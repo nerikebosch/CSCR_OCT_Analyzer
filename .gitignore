@@ -1,0 +1,27 @@
+# Patient Medical Scans & Clinical Data (Strict Privacy / HIPAA Compliance)
+*.bmp
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+202*/
+[0-9]*/
+scans/
+data/
+output/
+
+# Databases & Spreadsheets (Contains patient dates, thicknesses, notes, metrics)
+*.mat
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+
+# MATLAB Temporary, Autosave, and Cache Files
+*.asv
+*.autosave
+*.fig
+slprj/
+*.mex*
