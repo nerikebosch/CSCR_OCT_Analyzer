@@ -37,3 +37,4 @@ When generating, modifying, or debugging code for this project, adhere to the fo
 4. **Error Handling:** Maintain the `try-catch` block in the main loop to prevent a single scan failure from crashing the batch process.
 5. **Data Preservation:** When performing morphological transforms (like rotation in `align_image.m` or vertical stretching in `detect_hole.m`), ensure masks and coordinates are accurately inversely transformed back to the original `I_crop_orig` space for statistical analysis.
 6. **Code Style:** Keep functions strictly modular. Use descriptive variable names (`Layer_ILM`, `Mask_Hole`).
+7. **Documentation Maintenance:** Always update `README.md` whenever new features, modules, database schemas, or workflow steps are added or modified in the project.
