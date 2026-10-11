@@ -131,15 +131,21 @@ function oct_dashboard()
     panelDropdown = uipanel(gridCorr, 'BorderType', 'none');
     lblDrop = uilabel(panelDropdown, 'Text', 'Select ROI Metric for Correlation:', 'Position', [10, 5, 200, 22], 'FontWeight', 'bold');
     
-    displayNames = {'Median L1', 'Median L2', 'Median L3', 'Median L4', 'Median L5', ...
-                    'Ratio L1/L2', 'Ratio L2/L3', 'Ratio L3/L4', 'Ratio L4/L5', 'Ratio L1/L5'};
+    displayNames = {'Left: Median L1', 'Left: Median L2', 'Left: Median L3', 'Left: Median L4', 'Left: Median L5', ...
+                    'Left: Ratio L1/L2', 'Left: Ratio L2/L3', 'Left: Ratio L3/L4', 'Left: Ratio L4/L5', 'Left: Ratio L1/L5', ...
+                    'Right: Median L1', 'Right: Median L2', 'Right: Median L3', 'Right: Median L4', 'Right: Median L5', ...
+                    'Right: Ratio L1/L2', 'Right: Ratio L2/L3', 'Right: Ratio L3/L4', 'Right: Ratio L4/L5', 'Right: Ratio L1/L5'};
+                    
     dbVariables = {'Median_Left_L1', 'Median_Left_L2', 'Median_Left_L3', 'Median_Left_L4', 'Median_Left_L5', ...
-                   'Median_Ratio_L1_L2', 'Median_Ratio_L2_L3', 'Median_Ratio_L3_L4', 'Median_Ratio_L4_L5', 'Median_Ratio_L1_L5'};
+                   'Median_Ratio_Left_L1_L2', 'Median_Ratio_Left_L2_L3', 'Median_Ratio_Left_L3_L4', 'Median_Ratio_Left_L4_L5', 'Median_Ratio_Left_L1_L5', ...
+                   'Median_Right_L1', 'Median_Right_L2', 'Median_Right_L3', 'Median_Right_L4', 'Median_Right_L5', ...
+                   'Median_Ratio_Right_L1_L2', 'Median_Ratio_Right_L2_L3', 'Median_Ratio_Right_L3_L4', 'Median_Ratio_Right_L4_L5', 'Median_Ratio_Right_L1_L5'};
+                   
     ddCorrMetric = uidropdown(panelDropdown, 'Position', [220, 5, 200, 22], ...
         'Items', displayNames, ...
         'ItemsData', dbVariables, ...
-        'Value', 'Median_Ratio_L3_L4', ... 
-        'ValueChangedFcn', @(~,~) {render_correlation_plot(), render_longitudinal_plot()});
+        'Value', 'Median_Ratio_Left_L3_L4', ... 
+        'ValueChangedFcn', @(~,~) on_metric_changed());
         
     axCorr = uiaxes(gridCorr);
     axCorr.FontSize = 11;
@@ -191,6 +197,11 @@ function oct_dashboard()
         render_all_visits_table();
         lblDbStatus.Text = sprintf('Database: %d Visits | %d Scans | Updated %s', ...
             height(VisitsData), height(ScansData), datestr(now, 'HH:MM:SS'));
+    end
+    function on_metric_changed()
+        % Instantly updates both graphs when the dropdown changes
+        render_correlation_plot();
+        render_longitudinal_plot();
     end
     function on_visit_selected()
         if isempty(VisitsData), return; end
@@ -279,7 +290,6 @@ function oct_dashboard()
                           'Indeterminate', 'on');
         try
             opts = struct('plotoption', 1);
-            ]
             vNum = process_oct_folder(fPath, opts);
             close(d);
             refresh_all_data();
