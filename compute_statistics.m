@@ -15,8 +15,10 @@ function varargout = compute_statistics(varargin)
     switch action
         case 'update_all'
             varargout{1} = update_all_metrics();
-        case 'correlations'
-            varargout{1} = compute_correlations();
+        case 'correlations' 
+            target = 'Mean_Ratio_Left_L4_L5'; 
+            if length(varargin)>1, target=varargin{2}; end
+            varargout{1} = compute_correlations(target);
         case 'plot'
             savePath = '';
             if length(varargin) > 1, savePath = varargin{2}; end
@@ -98,42 +100,37 @@ function Summary = update_all_metrics()
 end
 
 %% 2. Clinical Correlations (Central Thickness vs. Speckle Statistics)
-function statsOut = compute_correlations()
+function statsOut = compute_correlations(target_metric)
+    % Default to L4/L5 ratio if no metric is specified
+    if nargin < 1 || isempty(target_metric)
+        target_metric = 'Mean_Ratio_Left_L4_L5';
+    end
+
     Summary = db_manager('get_summary');
+    
+    % Check if metric exists
+    if ~ismember(target_metric, Summary.Properties.VariableNames)
+        error('Metric %s not found in Summary database.', target_metric);
+    end
 
-    % Clean valid pairs for OD
-    validOD = ~isnan(Summary.CentralThickness_OD) & ~isnan(Summary.Mean_Ratio_Left_L4_L5);
+    % Clean valid pairs for OD Central Thickness vs target metric
+    validOD = ~isnan(Summary.CentralThickness_OD) & ~isnan(Summary.(target_metric));
     th = Summary.CentralThickness_OD(validOD);
-    cr_ratio = Summary.Mean_Ratio_Left_L4_L5(validOD);
-
-    % Pearson correlation
-    [r_pearson, p_pearson] = corr(th, cr_ratio, 'Type', 'Pearson');
-
-    % Spearman correlation (rank-based, robust against outliers)
-    [r_spearman, p_spearman] = corr(th, cr_ratio, 'Type', 'Spearman');
-
-    % Linear regression model
-    mdl = fitlm(th, cr_ratio);
-
+    target_data = Summary.(target_metric)(validOD);
+    
+    % Pearson & Spearman correlation
+    [r_pearson, p_pearson] = corr(th, target_data, 'Type', 'Pearson');
+    [r_spearman, p_spearman] = corr(th, target_data, 'Type', 'Spearman');
+    mdl = fitlm(th, target_data);
+    
     statsOut = struct();
+    statsOut.MetricName = strrep(target_metric, '_', ' ');
     statsOut.N = sum(validOD);
     statsOut.Pearson_r = r_pearson;
     statsOut.Pearson_p = p_pearson;
     statsOut.Spearman_rho = r_spearman;
     statsOut.Spearman_p = p_spearman;
     statsOut.R_squared = mdl.Rsquared.Ordinary;
-    statsOut.LinearModel = mdl;
-
-    fprintf('\n=== STATISTICAL CORRELATION: Central Thickness vs. L4/L5 Ratio ===\n');
-    fprintf('  Total Valid Visits Analyzed: %d\n', statsOut.N);
-    fprintf('  Pearson Correlation (r):     %.4f (p = %.4e)\n', r_pearson, p_pearson);
-    fprintf('  Spearman Correlation (rho): %.4f (p = %.4e)\n', r_spearman, p_spearman);
-    fprintf('  Linear Model R-squared:      %.4f\n', statsOut.R_squared);
-    if p_pearson < 0.05
-        fprintf('  --> Statistically Significant (p < 0.05)!\n\n');
-    else
-        fprintf('  --> Not Statistically Significant at alpha = 0.05.\n\n');
-    end
 end
 
 %% 3. Publication-Grade Longitudinal Plot

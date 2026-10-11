@@ -262,43 +262,60 @@ end
 function Summary = get_summary_table(dbPath)
     Visits = get_visits_table(dbPath);
     Scans = get_scans_table(dbPath, []);
-
     numVisits = height(Visits);
-    mean_ratio_l = NaN(numVisits, 1);
-    std_ratio_l  = NaN(numVisits, 1);
-    mean_ratio_r = NaN(numVisits, 1);
-    std_ratio_r  = NaN(numVisits, 1);
-    mean_roc_l   = NaN(numVisits, 1);
-    mean_roc_r   = NaN(numVisits, 1);
+
+    % Initialize arrays for all 5 layers and their ratios (now using MEDIAN)
+    med_l1 = NaN(numVisits, 1); med_l2 = NaN(numVisits, 1);
+    med_l3 = NaN(numVisits, 1); med_l4 = NaN(numVisits, 1); med_l5 = NaN(numVisits, 1);
+    
+    med_ratio_l1_l2 = NaN(numVisits, 1); med_ratio_l2_l3 = NaN(numVisits, 1);
+    med_ratio_l3_l4 = NaN(numVisits, 1); med_ratio_l4_l5 = NaN(numVisits, 1);
+    med_ratio_l1_l5 = NaN(numVisits, 1); med_roc_l = NaN(numVisits, 1);
 
     for i = 1:numVisits
         vNum = Visits.VisitNum(i);
         subScans = Scans(Scans.VisitNum == vNum & Scans.EyeSide == "OD", :);
+
         if ~isempty(subScans)
-            r_l = subScans.Ratio_Left_L4_L5(~isnan(subScans.Ratio_Left_L4_L5));
-            if ~isempty(r_l)
-                mean_ratio_l(i) = mean(r_l);
-                if length(r_l) > 1, std_ratio_l(i) = std(r_l); end
-            end
+            % Single Layers - USING MEDIAN
+            l1 = subScans.ROI_Left_L1(subScans.ROI_Left_L1 > 0 & ~isnan(subScans.ROI_Left_L1));
+            l2 = subScans.ROI_Left_L2(subScans.ROI_Left_L2 > 0 & ~isnan(subScans.ROI_Left_L2));
+            l3 = subScans.ROI_Left_L3(subScans.ROI_Left_L3 > 0 & ~isnan(subScans.ROI_Left_L3));
+            l4 = subScans.ROI_Left_L4(subScans.ROI_Left_L4 > 0 & ~isnan(subScans.ROI_Left_L4));
+            l5 = subScans.ROI_Left_L5(subScans.ROI_Left_L5 > 0 & ~isnan(subScans.ROI_Left_L5));
 
-            r_r = subScans.Ratio_Right_L4_L5(~isnan(subScans.Ratio_Right_L4_L5));
-            if ~isempty(r_r)
-                mean_ratio_r(i) = mean(r_r);
-                if length(r_r) > 1, std_ratio_r(i) = std(r_r); end
-            end
+            if ~isempty(l1), med_l1(i) = median(l1); end
+            if ~isempty(l2), med_l2(i) = median(l2); end
+            if ~isempty(l3), med_l3(i) = median(l3); end
+            if ~isempty(l4), med_l4(i) = median(l4); end
+            if ~isempty(l5), med_l5(i) = median(l5); end
 
+            % Ratios - USING MEDIAN
+            v12 = subScans.ROI_Left_L1 > 0 & subScans.ROI_Left_L2 > 0;
+            if any(v12), med_ratio_l1_l2(i) = median(subScans.ROI_Left_L1(v12) ./ subScans.ROI_Left_L2(v12)); end
+
+            v23 = subScans.ROI_Left_L2 > 0 & subScans.ROI_Left_L3 > 0;
+            if any(v23), med_ratio_l2_l3(i) = median(subScans.ROI_Left_L2(v23) ./ subScans.ROI_Left_L3(v23)); end
+
+            v34 = subScans.ROI_Left_L3 > 0 & subScans.ROI_Left_L4 > 0;
+            if any(v34), med_ratio_l3_l4(i) = median(subScans.ROI_Left_L3(v34) ./ subScans.ROI_Left_L4(v34)); end
+
+            v45 = subScans.ROI_Left_L4 > 0 & subScans.ROI_Left_L5 > 0;
+            if any(v45), med_ratio_l4_l5(i) = median(subScans.ROI_Left_L4(v45) ./ subScans.ROI_Left_L5(v45)); end
+
+            v15 = subScans.ROI_Left_L1 > 0 & subScans.ROI_Left_L5 > 0;
+            if any(v15), med_ratio_l1_l5(i) = median(subScans.ROI_Left_L1(v15) ./ subScans.ROI_Left_L5(v15)); end
+
+            % Rate of change usually remains mean, or median of slices
             roc_l = subScans.RateOfChange_Left(~isnan(subScans.RateOfChange_Left));
-            if ~isempty(roc_l), mean_roc_l(i) = mean(roc_l); end
-
-            roc_r = subScans.RateOfChange_Right(~isnan(subScans.RateOfChange_Right));
-            if ~isempty(roc_r), mean_roc_r(i) = mean(roc_r); end
+            if ~isempty(roc_l), med_roc_l(i) = median(roc_l); end
         end
     end
 
-    Summary = addvars(Visits, mean_ratio_l, std_ratio_l, mean_roc_l, ...
-                             mean_ratio_r, std_ratio_r, mean_roc_r, ...
-        'NewVariableNames', {'Mean_Ratio_Left_L4_L5', 'Std_Ratio_Left_L4_L5', 'Mean_RateOfChange_Left', ...
-                             'Mean_Ratio_Right_L4_L5', 'Std_Ratio_Right_L4_L5', 'Mean_RateOfChange_Right'});
+    Summary = addvars(Visits, med_l1, med_l2, med_l3, med_l4, med_l5, ...
+        med_ratio_l1_l2, med_ratio_l2_l3, med_ratio_l3_l4, med_ratio_l4_l5, med_ratio_l1_l5, med_roc_l, ...
+        'NewVariableNames', {'Median_Left_L1', 'Median_Left_L2', 'Median_Left_L3', 'Median_Left_L4', 'Median_Left_L5', ...
+        'Median_Ratio_L1_L2', 'Median_Ratio_L2_L3', 'Median_Ratio_L3_L4', 'Median_Ratio_L4_L5', 'Median_Ratio_L1_L5', 'Median_RateOfChange_Left'});
 end
 
 function export_csv_tables(dbPath, outDir)
