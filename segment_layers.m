@@ -118,7 +118,42 @@ function [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4,Layer_Inner_Bot, La
     figure(h1);
     plot(1:sx,Layer_RPE_bot,'m.')
     
+    % --- RPE SHADOW ANOMALY CORRECTION (STRICT) ---
+    % 1. Measure only the extreme outer 10% to completely avoid giant fluid pockets
+    stable_cols = [1:round(sx*0.10), round(sx*0.90):sx];
+    valid_diffs = Layer_RPE_bot(stable_cols) - Layer_RPE_top(stable_cols);
+    valid_diffs(isnan(valid_diffs) | valid_diffs <= 0) = [];
     
+    if ~isempty(valid_diffs)
+        expected_thickness = median(valid_diffs);
+    else
+        expected_thickness = 15; % Safe fallback
+    end
+    
+    % 2. Hard Biological Cap: The RPE complex should never be massive. 
+    % If the edge measurement was tricked by a giant shadow, force it to a normal 18 pixels.
+    if expected_thickness > 25
+        expected_thickness = 18; 
+    end
+    
+    % 3. Strict Clipping: Allow max 50% variance. Anything thicker is a shadow glitch.
+    max_allowed_thickness = expected_thickness * 1.5;
+    
+    for x = 1:sx
+        if isnan(Layer_RPE_bot(x)) || isnan(Layer_RPE_top(x))
+            continue;
+        end
+        
+        current_thick = Layer_RPE_bot(x) - Layer_RPE_top(x);
+        
+        % If the layer dives deep into a shadow (too thick) or glitches upward (too thin)
+        if current_thick > max_allowed_thickness || current_thick < 5
+            Layer_RPE_bot(x) = Layer_RPE_top(x) + expected_thickness;
+        end
+    end
+    
+    % Re-smooth the corrected bottom line
+    Layer_RPE_bot = smoothdata(fillmissing(Layer_RPE_bot, 'linear', 'EndValues', 'nearest'), 'sgolay', 45);
     
     Mask_RPE_only = Mask_RPE_top & ~Mask_RPE_bot;
     
