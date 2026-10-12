@@ -16,9 +16,11 @@ function varargout = compute_statistics(varargin)
         case 'update_all'
             varargout{1} = update_all_metrics();
         case 'correlations' 
-            target = 'Mean_Ratio_Left_L4_L5'; 
+            target = 'Median_Ratio_Left_L4_L5'; 
+            targetEye = 'OD';
             if length(varargin)>1, target=varargin{2}; end
-            varargout{1} = compute_correlations(target);
+            if length(varargin)>2, targetEye=varargin{3}; end
+            varargout{1} = compute_correlations(target, targetEye);
         case 'plot'
             savePath = '';
             if length(varargin) > 1, savePath = varargin{2}; end
@@ -100,37 +102,40 @@ function Summary = update_all_metrics()
 end
 
 %% 2. Clinical Correlations (Central Thickness vs. Speckle Statistics)
-function statsOut = compute_correlations(target_metric)
-    % Default to L4/L5 ratio if no metric is specified
-    if nargin < 1 || isempty(target_metric)
-        target_metric = 'Mean_Ratio_Left_L4_L5';
-    end
-
+function statsOut = compute_correlations(target_metric, targetEye)
+    if nargin < 2 || isempty(targetEye), targetEye = "OD"; end
+    
     Summary = db_manager('get_summary');
     
-    % Check if metric exists
     if ~ismember(target_metric, Summary.Properties.VariableNames)
         error('Metric %s not found in Summary database.', target_metric);
     end
-
-    % Clean valid pairs for OD Central Thickness vs target metric
-    validOD = ~isnan(Summary.CentralThickness_OD) & ~isnan(Summary.(target_metric));
-    th = Summary.CentralThickness_OD(validOD);
-    target_data = Summary.(target_metric)(validOD);
     
-    % Pearson & Spearman correlation
-    [r_pearson, p_pearson] = corr(th, target_data, 'Type', 'Pearson');
-    [r_spearman, p_spearman] = corr(th, target_data, 'Type', 'Spearman');
-    mdl = fitlm(th, target_data);
+    if targetEye == "OD"
+        th = Summary.CentralThickness_OD;
+    else
+        th = Summary.CentralThickness_OS;
+    end
     
-    statsOut = struct();
-    statsOut.MetricName = strrep(target_metric, '_', ' ');
-    statsOut.N = sum(validOD);
-    statsOut.Pearson_r = r_pearson;
-    statsOut.Pearson_p = p_pearson;
-    statsOut.Spearman_rho = r_spearman;
-    statsOut.Spearman_p = p_spearman;
-    statsOut.R_squared = mdl.Rsquared.Ordinary;
+    validPairs = ~isnan(th) & ~isnan(Summary.(target_metric));
+    th_valid = th(validPairs);
+    target_data = Summary.(target_metric)(validPairs);
+    
+    % --- SAFETY CHECK FOR EMPTY DATA ---
+    if length(th_valid) < 2
+        statsOut = struct('MetricName', strrep(target_metric, '_', ' '), 'N', 0, ...
+                          'Pearson_r', NaN, 'Pearson_p', NaN, ...
+                          'Spearman_rho', NaN, 'Spearman_p', NaN, 'R_squared', 0);
+        return;
+    end
+    
+    [r_pearson, p_pearson] = corr(th_valid, target_data, 'Type', 'Pearson');
+    [r_spearman, p_spearman] = corr(th_valid, target_data, 'Type', 'Spearman');
+    mdl = fitlm(th_valid, target_data);
+    
+    statsOut = struct('MetricName', strrep(target_metric, '_', ' '), 'N', sum(validPairs), ...
+                      'Pearson_r', r_pearson, 'Pearson_p', p_pearson, ...
+                      'Spearman_rho', r_spearman, 'Spearman_p', p_spearman, 'R_squared', mdl.Rsquared.Ordinary);
 end
 
 %% 3. Publication-Grade Longitudinal Plot

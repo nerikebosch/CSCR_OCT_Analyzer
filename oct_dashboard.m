@@ -18,14 +18,20 @@ function oct_dashboard()
     mainGrid.RowSpacing = 8;
     %% 1. Header Bar
     headerPanel = uipanel(mainGrid, 'BackgroundColor', [0.15 0.22 0.35], 'BorderType', 'none');
-    headerGrid = uigridlayout(headerPanel, [1, 5]);
-    headerGrid.ColumnWidth = {'1x', 140, 130, 110, 110};
+    headerGrid = uigridlayout(headerPanel, [1, 6]); % Changed to 6 columns
+    headerGrid.ColumnWidth = {'1x', 140, 140, 130, 110, 110}; % Added space for new dropdown
     headerGrid.Padding = [12, 6, 12, 6];
+    
     titleLabel = uilabel(headerGrid, ...
         'Text', 'OCT Clinical Study Dashboard  |  Patient CSCR_M_011', ...
         'FontSize', 16, 'FontWeight', 'bold', 'FontColor', [1 1 1]);
-    btnProcess = uibutton(headerGrid, 'push', ...
-        'Text', '+ Process Folder', ...
+        
+    % NEW EYE SELECTOR DROPDOWN
+    ddEyeSelect = uidropdown(headerGrid, 'Items', {'Right Eye (OD - Diseased)', 'Left Eye (OS - Healthy)'}, ...
+        'ItemsData', {'OD', 'OS'}, 'FontWeight', 'bold', ...
+        'ValueChangedFcn', @(~,~) refresh_all_data());
+        
+    btnProcess = uibutton(headerGrid, 'push', 'Text', '+ Process Folder', ...
         'BackgroundColor', [0.2 0.6 0.35], 'FontColor', [1 1 1], 'FontWeight', 'bold', ...
         'ButtonPushedFcn', @(~,~) on_process_folder());
     btnExport = uibutton(headerGrid, 'push', ...
@@ -124,27 +130,19 @@ function oct_dashboard()
     % Tab 2: Clinical Correlations
     tabCorr = uitab(tabGroup, 'Title', 'Thickness vs. Speckle Correlations');
     gridCorr = uigridlayout(tabCorr, [3, 1]);
-    gridCorr.RowHeight = {30, '1x', 140};
+    gridCorr.RowHeight = {40, '1x', 140};
     gridCorr.Padding = [10, 10, 10, 10];
     
     % Dropdown to select which layer/ratio to correlate
     panelDropdown = uipanel(gridCorr, 'BorderType', 'none');
-    lblDrop = uilabel(panelDropdown, 'Text', 'Select ROI Metric for Correlation:', 'Position', [10, 5, 200, 22], 'FontWeight', 'bold');
     
-    displayNames = {'Left: Median L1', 'Left: Median L2', 'Left: Median L3', 'Left: Median L4', 'Left: Median L5', ...
-                    'Left: Ratio L1/L2', 'Left: Ratio L2/L3', 'Left: Ratio L3/L4', 'Left: Ratio L4/L5', 'Left: Ratio L1/L5', ...
-                    'Right: Median L1', 'Right: Median L2', 'Right: Median L3', 'Right: Median L4', 'Right: Median L5', ...
-                    'Right: Ratio L1/L2', 'Right: Ratio L2/L3', 'Right: Ratio L3/L4', 'Right: Ratio L4/L5', 'Right: Ratio L1/L5'};
-                    
-    dbVariables = {'Median_Left_L1', 'Median_Left_L2', 'Median_Left_L3', 'Median_Left_L4', 'Median_Left_L5', ...
-                   'Median_Ratio_Left_L1_L2', 'Median_Ratio_Left_L2_L3', 'Median_Ratio_Left_L3_L4', 'Median_Ratio_Left_L4_L5', 'Median_Ratio_Left_L1_L5', ...
-                   'Median_Right_L1', 'Median_Right_L2', 'Median_Right_L3', 'Median_Right_L4', 'Median_Right_L5', ...
-                   'Median_Ratio_Right_L1_L2', 'Median_Ratio_Right_L2_L3', 'Median_Ratio_Right_L3_L4', 'Median_Ratio_Right_L4_L5', 'Median_Ratio_Right_L1_L5'};
-                   
-    ddCorrMetric = uidropdown(panelDropdown, 'Position', [220, 5, 200, 22], ...
-        'Items', displayNames, ...
-        'ItemsData', dbVariables, ...
-        'Value', 'Median_Ratio_Left_L3_L4', ... 
+    lblEye = uilabel(panelDropdown, 'Text', '1. Select Eye:', 'Position', [10, 10, 80, 22], 'FontWeight', 'bold');
+    ddEye = uidropdown(panelDropdown, 'Position', [95, 10, 130, 22], ...
+        'Items', {'OD (Diseased)', 'OS (Healthy)'}, 'ItemsData', {'OD', 'OS'}, ...
+        'Value', 'OD', 'ValueChangedFcn', @(~,~) update_metric_dropdown());
+        
+    lblDrop = uilabel(panelDropdown, 'Text', '2. Select Metric:', 'Position', [240, 10, 110, 22], 'FontWeight', 'bold');
+    ddCorrMetric = uidropdown(panelDropdown, 'Position', [350, 10, 250, 22], ...
         'ValueChangedFcn', @(~,~) on_metric_changed());
         
     axCorr = uiaxes(gridCorr);
@@ -174,13 +172,15 @@ function oct_dashboard()
     %% Nested Event Callbacks
     function refresh_all_data()
         compute_statistics('update_all');
-        SummaryData = db_manager('get_summary');
+        SummaryData = db_manager('get_summary'); % Removed targetEye here
         VisitsData  = db_manager('get_visits');
         ScansData   = db_manager('get_scans');
+        
         if isempty(SummaryData)
-            uialert(fig, 'No study data found in database. Please run migrate_excel_to_db.', 'Empty Database');
+            uialert(fig, 'No study data found in database.', 'Empty Database');
             return;
         end
+        
         % Update Visit Dropdown
         visitItems = cell(height(VisitsData), 1);
         for v = 1:height(VisitsData)
@@ -188,21 +188,48 @@ function oct_dashboard()
                 VisitsData.VisitNum(v), datestr(VisitsData.VisitDate(v), 'yyyy-mm-dd'));
         end
         ddVisit.Items = visitItems;
-        % Default to last visit
-        ddVisit.Value = visitItems{end};
+        ddVisit.Value = visitItems{end}; % Default to last visit
         on_visit_selected();
-        % Render Visualizations
-        render_longitudinal_plot();
-        render_correlation_plot();
+        
+        % Populate the metric dropdown, which will automatically trigger the plots
+        update_metric_dropdown();
         render_all_visits_table();
+        
         lblDbStatus.Text = sprintf('Database: %d Visits | %d Scans | Updated %s', ...
             height(VisitsData), height(ScansData), datestr(now, 'HH:MM:SS'));
     end
+
     function on_metric_changed()
-        % Instantly updates both graphs when the dropdown changes
         render_correlation_plot();
         render_longitudinal_plot();
     end
+
+    function update_metric_dropdown()
+        eye = ddEye.Value; % 'OD' or 'OS'
+        
+        % Generate the clean display names
+        dispNames = {'Left ROI: Median L1', 'Left ROI: Median L2', 'Left ROI: Median L3', 'Left ROI: Median L4', 'Left ROI: Median L5', ...
+                     'Left ROI: Ratio L1/L2', 'Left ROI: Ratio L2/L3', 'Left ROI: Ratio L3/L4', 'Left ROI: Ratio L4/L5', 'Left ROI: Ratio L1/L5', ...
+                     'Right ROI: Median L1', 'Right ROI: Median L2', 'Right ROI: Median L3', 'Right ROI: Median L4', 'Right ROI: Median L5', ...
+                     'Right ROI: Ratio L1/L2', 'Right ROI: Ratio L2/L3', 'Right ROI: Ratio L3/L4', 'Right ROI: Ratio L4/L5', 'Right ROI: Ratio L1/L5'};
+                     
+        % Generate the exact DB Variable names that match the eye selected
+        dbVars = { ...
+            sprintf('Median_%s_Left_L1', eye), sprintf('Median_%s_Left_L2', eye), sprintf('Median_%s_Left_L3', eye), sprintf('Median_%s_Left_L4', eye), sprintf('Median_%s_Left_L5', eye), ...
+            sprintf('Median_%s_Left_Ratio_L1_L2', eye), sprintf('Median_%s_Left_Ratio_L2_L3', eye), sprintf('Median_%s_Left_Ratio_L3_L4', eye), sprintf('Median_%s_Left_Ratio_L4_L5', eye), sprintf('Median_%s_Left_Ratio_L1_L5', eye), ...
+            sprintf('Median_%s_Right_L1', eye), sprintf('Median_%s_Right_L2', eye), sprintf('Median_%s_Right_L3', eye), sprintf('Median_%s_Right_L4', eye), sprintf('Median_%s_Right_L5', eye), ...
+            sprintf('Median_%s_Right_Ratio_L1_L2', eye), sprintf('Median_%s_Right_Ratio_L2_L3', eye), sprintf('Median_%s_Right_Ratio_L3_L4', eye), sprintf('Median_%s_Right_Ratio_L4_L5', eye), sprintf('Median_%s_Right_Ratio_L1_L5', eye) ...
+        };
+        
+        ddCorrMetric.Items = dispNames;
+        ddCorrMetric.ItemsData = dbVars;
+        
+        % Force default to L3/L4 Ratio to save time
+        ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L3_L4', eye); 
+        
+        on_metric_changed();
+    end
+
     function on_visit_selected()
         if isempty(VisitsData), return; end
         vIdx = ddVisit.Value;
@@ -212,11 +239,18 @@ function oct_dashboard()
         rowIdx = find(VisitsData.VisitNum == currVisitNum, 1);
         if isempty(rowIdx), return; end
         vRow = VisitsData(rowIdx, :);
+        
         lblDate.Text = datestr(vRow.VisitDate, 'yyyy-mm-dd');
         lblDays.Text = sprintf('%.0f days', vRow.DaysFromBaseline);
-        efThicknessOD.Value = vRow.CentralThickness_OD;
-        efThicknessOS.Value = vRow.CentralThickness_OS;
+        
+        % Safely handle NaN thickness values for UI
+        thOD = vRow.CentralThickness_OD; if isnan(thOD), thOD = 0; end
+        thOS = vRow.CentralThickness_OS; if isnan(thOS), thOS = 0; end
+        efThicknessOD.Value = thOD;
+        efThicknessOS.Value = thOS;
+        
         taNotes.Value = {char(vRow.Notes)};
+        
         % Status badge based on thickness OD
         th = vRow.CentralThickness_OD;
         if th >= 400
@@ -229,6 +263,7 @@ function oct_dashboard()
             lblStatus.Text = 'Remission / Normal';
             lblStatus.FontColor = [0.15 0.6 0.2];
         end
+        
         % Slices mini-table
         subScans = ScansData(ScansData.VisitNum == currVisitNum & ScansData.EyeSide == "OD", :);
         if ~isempty(subScans)
@@ -239,6 +274,7 @@ function oct_dashboard()
             tblSlices.Data = table();
         end
     end
+
     function on_save_visit()
         tok = regexp(ddVisit.Value, 'Visit (\d+)', 'tokens');
         if isempty(tok), return; end
@@ -343,7 +379,13 @@ function oct_dashboard()
         
         % Standard deviation is currently unused, set to 0
         ratio_std = zeros(height(SummaryData), 1);
-        th_OD  = SummaryData.CentralThickness_OD;
+        if ddEyeSelect.Value == "OD"
+            th_data = SummaryData.CentralThickness_OD;
+            thickness_label = 'Central Thickness OD (\mum)';
+        else
+            th_data = SummaryData.CentralThickness_OS;
+            thickness_label = 'Central Thickness OS (\mum)';
+        end
         
         % DYNAMIC RATE OF CHANGE CALCULATION
         % Calculate velocity based on whatever metric is currently selected
@@ -384,13 +426,13 @@ function oct_dashboard()
         % 3. Right Axis: Central Thickness OD
         yyaxis(axEvolution, 'right');
         if cbThickness.Value
-            validTh = ~isnan(th_OD);
+            validTh = ~isnan(th_data);
             if any(validTh)
-                plot(axEvolution, visits(validTh), th_OD(validTh), 's--', ...
+                plot(axEvolution, visits(validTh), th_data(validTh), 's--', ...
                     'Color', [0.85 0.35 0.1], 'MarkerSize', 6, 'MarkerFaceColor', [1 0.65 0.35], ...
-                    'LineWidth', 1.5, 'DisplayName', 'Central Thickness OD');
-                ylabel(axEvolution, 'Central Thickness (\mum)', 'FontWeight', 'bold');
-                ylim(axEvolution, [min(th_OD(validTh))-30, max(th_OD(validTh))+40]);
+                    'LineWidth', 1.5, 'DisplayName', thickness_label);
+                ylabel(axEvolution, thickness_label, 'FontWeight', 'bold');
+                ylim(axEvolution, [min(th_data(validTh))-30, max(th_data(validTh))+40]);
             end
         else
             ylabel(axEvolution, '');
@@ -448,7 +490,8 @@ function oct_dashboard()
         selected_metric = ddCorrMetric.Value;
         
         % Compute correlation for this specific metric
-        corrs = compute_statistics('correlations', selected_metric);
+        targetEye = ddEyeSelect.Value; 
+        corrs = compute_statistics('correlations', selected_metric, targetEye);
         
         valid = ~isnan(SummaryData.CentralThickness_OD) & ~isnan(SummaryData.(selected_metric));
         xTh = SummaryData.CentralThickness_OD(valid);

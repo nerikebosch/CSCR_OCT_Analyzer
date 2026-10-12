@@ -138,19 +138,41 @@ function [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = detect_hole(I_crop, MODEL
         [MaxPH, indMaxPH] = max(posterior_hole);
     
     else
-        disp('No hole')
-        % --- Processing type I (No hole found) ---
+        disp('No hole found - creating robust virtual central split for symmetrical ROIs')
         
+        % Find the natural foveal center safely
         center_start = round(sx * 0.3);
         center_end = round(sx * 0.7);
-        [ilm_max_y, local_ind] = max(Layer_ILM(center_start:center_end));
-        indMaxPH = center_start + local_ind - 1; 
         
-        search_start = min(sy - 10, round(ilm_max_y) + 30); 
-        profile = double(I_crop(search_start:end, indMaxPH));
+        % Check if Layer_ILM is valid in this region
+        valid_ilm = Layer_ILM(center_start:center_end);
+        valid_ilm(isnan(valid_ilm) | valid_ilm <= 0) = [];
         
-        [~, peak_idx] = max(profile);
-        rpe_y = search_start + peak_idx - 1;
+        if ~isempty(valid_ilm)
+            [~, local_ind] = max(Layer_ILM(center_start:center_end));
+            indMaxPH = center_start + local_ind - 1;
+        else
+            % Fallback to exact middle of the image if edge slice is truncated
+            indMaxPH = round(sx / 2);
+        end
         
-        MaxPH = max(1, rpe_y - 15);
+        % Ensure indMaxPH is safely away from the extreme edges (at least 25% inward)
+        min_allowed = round(sx * 0.25);
+        max_allowed = round(sx * 0.75);
+        if indMaxPH < min_allowed || indMaxPH > max_allowed
+            indMaxPH = round(sx / 2);
+        end
+        
+        % Create a safe virtual central exclusion zone (20 pixels wide)
+        hole_width = 20;
+        start_col = max(1, indMaxPH - round(hole_width / 2));
+        end_col = min(sx, indMaxPH + round(hole_width / 2));
+        
+        Mask_Hole = false(sy, sx);
+        Mask_Hole(:, start_col:end_col) = true;
+        
+        MaxPH = round(sy / 2); 
+        
+        % Force flag to true so it always generates Left and Right ROIs!
+        is_hole_found = true; 
     end

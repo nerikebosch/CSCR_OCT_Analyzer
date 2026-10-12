@@ -9,15 +9,25 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
     if is_hole_found
         % Find where the hole starts on the left side
         hole_columns = any(Mask_Hole, 1);
-        hole_left_edge = find(hole_columns, 1, 'first');
         
+        if any(hole_columns)
+            hole_left_edge = find(hole_columns, 1, 'first');
+            hole_right_edge = find(hole_columns, 1, 'last');
+        else
+            % Fallback to exact center if mask is empty
+            hole_left_edge = round(sx / 2) - 10;
+            hole_right_edge = round(sx / 2) + 10;
+        end
+
         % Margins to protect the data
         safe_margin = 50; % Horizontal margin to stay clear of the hole
         vert_margin = 2; % Vertical margin to exclude the bright boundary lines
         
-        % Left ROI boundaries
+        % Left ROI boundaries with bounds enforcement
         x_left_start = 1; 
         x_left_end   = max(1, hole_left_edge - safe_margin);
+
+        
         
         % Initialize 5 separate masks for the left side
         Mask_ROI_L1 = false(sy, sx);
@@ -106,9 +116,8 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
     %% 5 Right-Side ROIs
         % Find where the hole ends on the right side
         % (hole_columns is already defined in the left-side code)
-        hole_right_edge = find(hole_columns, 1, 'last');
         
-        % Right ROI boundaries
+        % Right ROI boundaries with bounds enforcement
         x_right_start = min(sx, hole_right_edge + safe_margin);
         x_right_end   = sx;
         

@@ -118,48 +118,56 @@ function save_visit_record(dbPath, v)
     if ~isfile(dbPath), init_db(dbPath); end
     data = load(dbPath);
     Visits = data.DB.Visits;
-
+    
     % Normalize input values
     vNum = int32(v.VisitNum);
     vDate = v.VisitDate;
     if ~isa(vDate, 'datetime')
         vDate = datetime(vDate, 'InputFormat', 'yyyy-MM-dd');
     end
-
-    thOD = NaN; if isfield(v, 'CentralThickness_OD') && ~isempty(v.CentralThickness_OD), thOD = double(v.CentralThickness_OD); end
-    thOS = NaN; if isfield(v, 'CentralThickness_OS') && ~isempty(v.CentralThickness_OS), thOS = double(v.CentralThickness_OS); end
-    notesStr = ""; if isfield(v, 'Notes') && ~isempty(v.Notes), notesStr = string(v.Notes); end
-
-    % Compute days from baseline
-    daysFromBase = 0;
-    if ~isempty(Visits)
-        baseDate = min(Visits.VisitDate);
-        if vDate < baseDate
-            baseDate = vDate;
-        end
-        daysFromBase = double(days(vDate - baseDate));
-    end
-
+    
     % Update if exists or append
     idx = find(Visits.VisitNum == vNum, 1);
     if isempty(idx)
-        newRow = table(vNum, vDate, daysFromBase, thOD, thOS, notesStr, ...
+        % Brand new visit
+        thOD = NaN; if isfield(v, 'CentralThickness_OD') && ~isempty(v.CentralThickness_OD), thOD = double(v.CentralThickness_OD); end
+        thOS = NaN; if isfield(v, 'CentralThickness_OS') && ~isempty(v.CentralThickness_OS), thOS = double(v.CentralThickness_OS); end
+        
+        notesStr = ""; 
+        if isfield(v, 'Notes') && ~isempty(v.Notes)
+            if iscell(v.Notes), notesStr = string(strjoin(v.Notes, ' ')); else, notesStr = string(v.Notes); end
+        end
+        
+        newRow = table(vNum, vDate, 0, thOD, thOS, notesStr, ...
             'VariableNames', {'VisitNum', 'VisitDate', 'DaysFromBaseline', ...
                               'CentralThickness_OD', 'CentralThickness_OS', 'Notes'});
         Visits = [Visits; newRow];
     else
+        % Existing visit: Update date, preserve thickness unless provided, update notes safely
         Visits.VisitDate(idx) = vDate;
-        Visits.DaysFromBaseline(idx) = daysFromBase;
-        Visits.CentralThickness_OD(idx) = thOD;
-        Visits.CentralThickness_OS(idx) = thOS;
-        Visits.Notes(idx) = notesStr;
+        
+        if isfield(v, 'CentralThickness_OD') && ~isempty(v.CentralThickness_OD) && ~isnan(v.CentralThickness_OD)
+            Visits.CentralThickness_OD(idx) = double(v.CentralThickness_OD);
+        end
+        if isfield(v, 'CentralThickness_OS') && ~isempty(v.CentralThickness_OS) && ~isnan(v.CentralThickness_OS)
+            Visits.CentralThickness_OS(idx) = double(v.CentralThickness_OS);
+        end
+        
+        % Unconditionally update notes whenever the field is passed from the UI
+        if isfield(v, 'Notes')
+            if iscell(v.Notes)
+                Visits.Notes(idx) = string(strjoin(v.Notes, ' '));
+            else
+                Visits.Notes(idx) = string(v.Notes);
+            end
+        end
     end
-
+    
     % Re-sort by visit number and recalculate days from baseline
     Visits = sortrows(Visits, 'VisitNum');
     baseDate = Visits.VisitDate(1);
     Visits.DaysFromBaseline = double(days(Visits.VisitDate - baseDate));
-
+    
     data.DB.Visits = Visits;
     save(dbPath, '-struct', 'data', '-v7.3');
 end
@@ -264,72 +272,80 @@ function Summary = get_summary_table(dbPath)
     Scans = get_scans_table(dbPath, []);
     numVisits = height(Visits);
 
-    % Initialize arrays for LEFT
-    med_l1 = NaN(numVisits, 1); med_l2 = NaN(numVisits, 1); med_l3 = NaN(numVisits, 1); med_l4 = NaN(numVisits, 1); med_l5 = NaN(numVisits, 1);
-    med_ratio_l1_l2 = NaN(numVisits, 1); med_ratio_l2_l3 = NaN(numVisits, 1); med_ratio_l3_l4 = NaN(numVisits, 1); med_ratio_l4_l5 = NaN(numVisits, 1); med_ratio_l1_l5 = NaN(numVisits, 1);
-    med_roc_l = NaN(numVisits, 1);
-
-    % Initialize arrays for RIGHT
-    med_r1 = NaN(numVisits, 1); med_r2 = NaN(numVisits, 1); med_r3 = NaN(numVisits, 1); med_r4 = NaN(numVisits, 1); med_r5 = NaN(numVisits, 1);
-    med_ratio_r1_r2 = NaN(numVisits, 1); med_ratio_r2_r3 = NaN(numVisits, 1); med_ratio_r3_r4 = NaN(numVisits, 1); med_ratio_r4_r5 = NaN(numVisits, 1); med_ratio_r1_r5 = NaN(numVisits, 1);
-    med_roc_r = NaN(numVisits, 1);
-
-    for i = 1:numVisits
-        vNum = Visits.VisitNum(i);
-        subScans = Scans(Scans.VisitNum == vNum & Scans.EyeSide == "OD", :);
-
-        if ~isempty(subScans)
-            % --- LEFT SIDE ---
-            l1 = subScans.ROI_Left_L1(subScans.ROI_Left_L1 > 0 & ~isnan(subScans.ROI_Left_L1));
-            l2 = subScans.ROI_Left_L2(subScans.ROI_Left_L2 > 0 & ~isnan(subScans.ROI_Left_L2));
-            l3 = subScans.ROI_Left_L3(subScans.ROI_Left_L3 > 0 & ~isnan(subScans.ROI_Left_L3));
-            l4 = subScans.ROI_Left_L4(subScans.ROI_Left_L4 > 0 & ~isnan(subScans.ROI_Left_L4));
-            l5 = subScans.ROI_Left_L5(subScans.ROI_Left_L5 > 0 & ~isnan(subScans.ROI_Left_L5));
-
-            if ~isempty(l1), med_l1(i) = median(l1); end
-            if ~isempty(l2), med_l2(i) = median(l2); end
-            if ~isempty(l3), med_l3(i) = median(l3); end
-            if ~isempty(l4), med_l4(i) = median(l4); end
-            if ~isempty(l5), med_l5(i) = median(l5); end
-
-            v12 = subScans.ROI_Left_L1 > 0 & subScans.ROI_Left_L2 > 0; if any(v12), med_ratio_l1_l2(i) = median(subScans.ROI_Left_L1(v12) ./ subScans.ROI_Left_L2(v12)); end
-            v23 = subScans.ROI_Left_L2 > 0 & subScans.ROI_Left_L3 > 0; if any(v23), med_ratio_l2_l3(i) = median(subScans.ROI_Left_L2(v23) ./ subScans.ROI_Left_L3(v23)); end
-            v34 = subScans.ROI_Left_L3 > 0 & subScans.ROI_Left_L4 > 0; if any(v34), med_ratio_l3_l4(i) = median(subScans.ROI_Left_L3(v34) ./ subScans.ROI_Left_L4(v34)); end
-            v45 = subScans.ROI_Left_L4 > 0 & subScans.ROI_Left_L5 > 0; if any(v45), med_ratio_l4_l5(i) = median(subScans.ROI_Left_L4(v45) ./ subScans.ROI_Left_L5(v45)); end
-            v15 = subScans.ROI_Left_L1 > 0 & subScans.ROI_Left_L5 > 0; if any(v15), med_ratio_l1_l5(i) = median(subScans.ROI_Left_L1(v15) ./ subScans.ROI_Left_L5(v15)); end
-            roc_l = subScans.RateOfChange_Left(~isnan(subScans.RateOfChange_Left)); if ~isempty(roc_l), med_roc_l(i) = median(roc_l); end
-
-            % --- RIGHT SIDE ---
-            r1 = subScans.ROI_Right_L1(subScans.ROI_Right_L1 > 0 & ~isnan(subScans.ROI_Right_L1));
-            r2 = subScans.ROI_Right_L2(subScans.ROI_Right_L2 > 0 & ~isnan(subScans.ROI_Right_L2));
-            r3 = subScans.ROI_Right_L3(subScans.ROI_Right_L3 > 0 & ~isnan(subScans.ROI_Right_L3));
-            r4 = subScans.ROI_Right_L4(subScans.ROI_Right_L4 > 0 & ~isnan(subScans.ROI_Right_L4));
-            r5 = subScans.ROI_Right_L5(subScans.ROI_Right_L5 > 0 & ~isnan(subScans.ROI_Right_L5));
-
-            if ~isempty(r1), med_r1(i) = median(r1); end
-            if ~isempty(r2), med_r2(i) = median(r2); end
-            if ~isempty(r3), med_r3(i) = median(r3); end
-            if ~isempty(r4), med_r4(i) = median(r4); end
-            if ~isempty(r5), med_r5(i) = median(r5); end
-
-            vr12 = subScans.ROI_Right_L1 > 0 & subScans.ROI_Right_L2 > 0; if any(vr12), med_ratio_r1_r2(i) = median(subScans.ROI_Right_L1(vr12) ./ subScans.ROI_Right_L2(vr12)); end
-            vr23 = subScans.ROI_Right_L2 > 0 & subScans.ROI_Right_L3 > 0; if any(vr23), med_ratio_r2_r3(i) = median(subScans.ROI_Right_L2(vr23) ./ subScans.ROI_Right_L3(vr23)); end
-            vr34 = subScans.ROI_Right_L3 > 0 & subScans.ROI_Right_L4 > 0; if any(vr34), med_ratio_r3_r4(i) = median(subScans.ROI_Right_L3(vr34) ./ subScans.ROI_Right_L4(vr34)); end
-            vr45 = subScans.ROI_Right_L4 > 0 & subScans.ROI_Right_L5 > 0; if any(vr45), med_ratio_r4_r5(i) = median(subScans.ROI_Right_L4(vr45) ./ subScans.ROI_Right_L5(vr45)); end
-            vr15 = subScans.ROI_Right_L1 > 0 & subScans.ROI_Right_L5 > 0; if any(vr15), med_ratio_r1_r5(i) = median(subScans.ROI_Right_L1(vr15) ./ subScans.ROI_Right_L5(vr15)); end
-            roc_r = subScans.RateOfChange_Right(~isnan(subScans.RateOfChange_Right)); if ~isempty(roc_r), med_roc_r(i) = median(roc_r); end
+    % Define the target column names we will build
+    sides = {'Left', 'Right'};
+    metrics = {'L1', 'L2', 'L3', 'L4', 'L5', 'Ratio_L1_L2', 'Ratio_L2_L3', 'Ratio_L3_L4', 'Ratio_L4_L5', 'Ratio_L1_L5', 'RateOfChange'};
+    
+    % Initialize empty arrays for the table
+    summaryData = struct();
+    for eye = ["OD", "OS"]
+        for s = 1:length(sides)
+            for m = 1:length(metrics)
+                varName = sprintf('Median_%s_%s_%s', eye, sides{s}, metrics{m});
+                summaryData.(varName) = NaN(numVisits, 1);
+            end
         end
     end
 
-    Summary = addvars(Visits, med_l1, med_l2, med_l3, med_l4, med_l5, ...
-        med_ratio_l1_l2, med_ratio_l2_l3, med_ratio_l3_l4, med_ratio_l4_l5, med_ratio_l1_l5, med_roc_l, ...
-        med_r1, med_r2, med_r3, med_r4, med_r5, ...
-        med_ratio_r1_r2, med_ratio_r2_r3, med_ratio_r3_r4, med_ratio_r4_r5, med_ratio_r1_r5, med_roc_r, ...
-        'NewVariableNames', {...
-        'Median_Left_L1', 'Median_Left_L2', 'Median_Left_L3', 'Median_Left_L4', 'Median_Left_L5', ...
-        'Median_Ratio_Left_L1_L2', 'Median_Ratio_Left_L2_L3', 'Median_Ratio_Left_L3_L4', 'Median_Ratio_Left_L4_L5', 'Median_Ratio_Left_L1_L5', 'Median_RateOfChange_Left', ...
-        'Median_Right_L1', 'Median_Right_L2', 'Median_Right_L3', 'Median_Right_L4', 'Median_Right_L5', ...
-        'Median_Ratio_Right_L1_L2', 'Median_Ratio_Right_L2_L3', 'Median_Ratio_Right_L3_L4', 'Median_Ratio_Right_L4_L5', 'Median_Ratio_Right_L1_L5', 'Median_RateOfChange_Right'});
+    for i = 1:numVisits
+        vNum = Visits.VisitNum(i);
+        
+        for eye = ["OD", "OS"]
+            subScans = Scans(Scans.VisitNum == vNum & Scans.EyeSide == eye, :);
+            if isempty(subScans), continue; end
+            
+            for s = 1:length(sides)
+                side = sides{s}; % 'Left' or 'Right'
+                
+                % 1. Pool Single Layers (Combines Side ROI + Full ROI to handle mixed slices)
+                for L = 1:5
+                    colSide = sprintf('ROI_%s_L%d', side, L);
+                    colFull = sprintf('ROI_Full_L%d', L);
+                    
+                    pool = [subScans.(colSide)(subScans.(colSide) > 0 & ~isnan(subScans.(colSide))); ...
+                            subScans.(colFull)(subScans.(colFull) > 0 & ~isnan(subScans.(colFull)))];
+                            
+                    if ~isempty(pool)
+                        summaryData.(sprintf('Median_%s_%s_L%d', eye, side, L))(i) = median(pool);
+                    end
+                end
+                
+                % 2. Pool Ratios
+                ratioPairs = [1,2; 2,3; 3,4; 4,5; 1,5];
+                for r = 1:size(ratioPairs, 1)
+                    top = ratioPairs(r, 1); bot = ratioPairs(r, 2);
+                    
+                    cSideT = sprintf('ROI_%s_L%d', side, top); cSideB = sprintf('ROI_%s_L%d', side, bot);
+                    cFullT = sprintf('ROI_Full_L%d', top);     cFullB = sprintf('ROI_Full_L%d', bot);
+                    
+                    % Calculate ratio per slice, then pool
+                    vSide = subScans.(cSideT) > 0 & subScans.(cSideB) > 0;
+                    vFull = subScans.(cFullT) > 0 & subScans.(cFullB) > 0;
+                    
+                    poolRat = [subScans.(cSideT)(vSide) ./ subScans.(cSideB)(vSide); ...
+                               subScans.(cFullT)(vFull) ./ subScans.(cFullB)(vFull)];
+                               
+                    if ~isempty(poolRat)
+                        summaryData.(sprintf('Median_%s_%s_Ratio_L%d_L%d', eye, side, top, bot))(i) = median(poolRat);
+                    end
+                end
+                
+                % 3. Rate of change (Currently only calculated for Left/Right in main script)
+                cRoc = sprintf('RateOfChange_%s', side);
+                if ismember(cRoc, subScans.Properties.VariableNames)
+                    roc = subScans.(cRoc)(~isnan(subScans.(cRoc)));
+                    if ~isempty(roc), summaryData.(sprintf('Median_%s_%s_RateOfChange', eye, side))(i) = median(roc); end
+                end
+            end
+        end
+    end
+
+    % Convert the struct to table columns and attach to Visits
+    Summary = Visits;
+    fNames = fieldnames(summaryData);
+    for f = 1:length(fNames)
+        Summary.(fNames{f}) = summaryData.(fNames{f});
+    end
 end
 
 function export_csv_tables(dbPath, outDir)

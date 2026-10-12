@@ -140,17 +140,17 @@ function visitNum = process_oct_folder(folderPath, options)
             scanRecord.EyeSide = eyeSide;
             scanRecord.FileName = fileName;
 
-            % Right ROIs
-            if isstruct(STATS_Right)
+            % Right ROIs (with safety checks for empty/invalid structures)
+            if ~isempty(STATS_Right) && isstruct(STATS_Right)
                 if isfield(STATS_Right, 'R1') && ~isempty(STATS_Right.R1), scanRecord.ROI_Right_L1 = STATS_Right.R1.CR; end
                 if isfield(STATS_Right, 'R2') && ~isempty(STATS_Right.R2), scanRecord.ROI_Right_L2 = STATS_Right.R2.CR; end
                 if isfield(STATS_Right, 'R3') && ~isempty(STATS_Right.R3), scanRecord.ROI_Right_L3 = STATS_Right.R3.CR; end
                 if isfield(STATS_Right, 'R4') && ~isempty(STATS_Right.R4), scanRecord.ROI_Right_L4 = STATS_Right.R4.CR; end
                 if isfield(STATS_Right, 'R5') && ~isempty(STATS_Right.R5), scanRecord.ROI_Right_L5 = STATS_Right.R5.CR; end
             end
-
-            % Left ROIs
-            if isstruct(STATS_Left)
+            
+            % Left ROIs (with safety checks for empty/invalid structures)
+            if ~isempty(STATS_Left) && isstruct(STATS_Left)
                 if isfield(STATS_Left, 'L1') && ~isempty(STATS_Left.L1), scanRecord.ROI_Left_L1 = STATS_Left.L1.CR; end
                 if isfield(STATS_Left, 'L2') && ~isempty(STATS_Left.L2), scanRecord.ROI_Left_L2 = STATS_Left.L2.CR; end
                 if isfield(STATS_Left, 'L3') && ~isempty(STATS_Left.L3), scanRecord.ROI_Left_L3 = STATS_Left.L3.CR; end
@@ -187,7 +187,7 @@ function [vDate, eyeSide] = parse_folder_metadata(folderName)
     % Default fallbacks
     vDate = datetime('today');
     eyeSide = "OD";
-
+    
     % Check Eye side
     if contains(folderName, '_Retina_Radial_L_', 'IgnoreCase', true) || ...
        contains(folderName, '_L_', 'IgnoreCase', true)
@@ -196,12 +196,13 @@ function [vDate, eyeSide] = parse_folder_metadata(folderName)
            contains(folderName, '_R_', 'IgnoreCase', true)
         eyeSide = "OD";
     end
-
-    % Extract date matching 8 consecutive digits starting with 20 (e.g. 20240603)
+    
+    % Extract all 8-consecutive digit dates starting with 20
     dateTokens = regexp(folderName, '(20\d{6})', 'match');
     if ~isempty(dateTokens)
         try
-            vDate = datetime(dateTokens{1}, 'InputFormat', 'yyyyMMdd');
+            % Use the LAST token to avoid matching the automated export prefix timestamp
+            vDate = datetime(dateTokens{end}, 'InputFormat', 'yyyyMMdd');
         catch
             % Leave as today if parsing fails
         end
