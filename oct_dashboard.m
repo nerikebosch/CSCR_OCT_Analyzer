@@ -18,8 +18,8 @@ function oct_dashboard()
     mainGrid.RowSpacing = 8;
     %% 1. Header Bar
     headerPanel = uipanel(mainGrid, 'BackgroundColor', [0.15 0.22 0.35], 'BorderType', 'none');
-    headerGrid = uigridlayout(headerPanel, [1, 6]); % Changed to 6 columns
-    headerGrid.ColumnWidth = {'1x', 140, 140, 130, 110, 110}; % Added space for new dropdown
+    headerGrid = uigridlayout(headerPanel, [1, 5]); % 5 columns
+    headerGrid.ColumnWidth = {'1x', 180, 140, 130, 110};
     headerGrid.Padding = [12, 6, 12, 6];
     
     titleLabel = uilabel(headerGrid, ...
@@ -38,10 +38,6 @@ function oct_dashboard()
         'Text', 'Export Excel', ...
         'BackgroundColor', [0.25 0.45 0.7], 'FontColor', [1 1 1], 'FontWeight', 'bold', ...
         'ButtonPushedFcn', @(~,~) on_export_excel());
-    btnReport = uibutton(headerGrid, 'push', ...
-        'Text', 'Print Report', ...
-        'BackgroundColor', [0.4 0.4 0.5], 'FontColor', [1 1 1], ...
-        'ButtonPushedFcn', @(~,~) compute_statistics('report'));
     btnRefresh = uibutton(headerGrid, 'push', ...
         'Text', 'Refresh', ...
         'BackgroundColor', [0.3 0.35 0.45], 'FontColor', [1 1 1], ...
@@ -55,11 +51,11 @@ function oct_dashboard()
     sidePanel = uipanel(contentGrid, 'Title', 'Visit & Clinical Details', ...
                         'FontSize', 12, 'FontWeight', 'bold', ...
                         'BackgroundColor', [1 1 1]);
-    sideGrid = uigridlayout(sidePanel, [12, 2]);
-    sideGrid.RowHeight = {28, 28, 28, 28, 28, 28, 55, 32, 24, '1x', 32, 22};
+    sideGrid = uigridlayout(sidePanel, [9, 2]);
+    sideGrid.RowHeight = {28, 28, 28, 28, 28, '1x', 34, 34, 22};
     sideGrid.ColumnWidth = {110, '1x'};
     sideGrid.Padding = [10, 10, 10, 10];
-    sideGrid.RowSpacing = 6;
+    sideGrid.RowSpacing = 8;
     % Visit Selector
     uilabel(sideGrid, 'Text', 'Select Visit:', 'FontWeight', 'bold');
     ddVisit = uidropdown(sideGrid, 'Items', {'Visit 1'}, 'ValueChangedFcn', @(~,~) on_visit_selected());
@@ -75,9 +71,6 @@ function oct_dashboard()
     % Central Thickness OS
     uilabel(sideGrid, 'Text', 'Thickness OS (\mum):');
     efThicknessOS = uieditfield(sideGrid, 'numeric', 'Value', 248, 'RoundFractionalValues', 'on');
-    % Clinical Status
-    uilabel(sideGrid, 'Text', 'Clinical State:');
-    lblStatus = uilabel(sideGrid, 'Text', 'Remission', 'FontWeight', 'bold', 'FontColor', [0.1 0.6 0.2]);
     % Notes
     uilabel(sideGrid, 'Text', 'Clinical Notes:');
     taNotes = uitextarea(sideGrid, 'Value', {''});
@@ -87,12 +80,6 @@ function oct_dashboard()
         'BackgroundColor', [0.15 0.45 0.75], 'FontColor', [1 1 1], 'FontWeight', 'bold', ...
         'ButtonPushedFcn', @(~,~) on_save_visit());
     btnSaveVisit.Layout.Column = [1 2];
-    % Slice Table Header
-    lblSliceHeader = uilabel(sideGrid, 'Text', 'Image Slices for Selected Visit:', 'FontWeight', 'bold');
-    lblSliceHeader.Layout.Column = [1 2];
-    % Slice Mini Table
-    tblSlices = uitable(sideGrid, 'Data', table(), 'FontSize', 10);
-    tblSlices.Layout.Column = [1 2];
     % Add New Visit Button
     btnAddVisit = uibutton(sideGrid, 'push', ...
         'Text', '+ Add New Visit (e.g. Visit 23)', ...
@@ -116,7 +103,7 @@ function oct_dashboard()
     tControlsGrid.Padding = [0, 0, 0, 0];
     cbZones = uicheckbox(tControlsGrid, 'Text', 'Show Clinical Zones', 'Value', true, ...
                          'ValueChangedFcn', @(~,~) render_longitudinal_plot());
-    cbThickness = uicheckbox(tControlsGrid, 'Text', 'Overlay Central Thickness (OD)', 'Value', true, ...
+    cbThickness = uicheckbox(tControlsGrid, 'Text', 'Overlay Central Thickness', 'Value', true, ...
                             'ValueChangedFcn', @(~,~) render_longitudinal_plot());
     cbErrorBars = uicheckbox(tControlsGrid, 'Text', 'Show Error Bars (\pm \sigma)', 'Value', true, ...
                             'ValueChangedFcn', @(~,~) render_longitudinal_plot());
@@ -136,13 +123,8 @@ function oct_dashboard()
     % Dropdown to select which layer/ratio to correlate
     panelDropdown = uipanel(gridCorr, 'BorderType', 'none');
     
-    lblEye = uilabel(panelDropdown, 'Text', '1. Select Eye:', 'Position', [10, 10, 80, 22], 'FontWeight', 'bold');
-    ddEye = uidropdown(panelDropdown, 'Position', [95, 10, 130, 22], ...
-        'Items', {'OD (Diseased)', 'OS (Healthy)'}, 'ItemsData', {'OD', 'OS'}, ...
-        'Value', 'OD', 'ValueChangedFcn', @(~,~) update_metric_dropdown());
-        
-    lblDrop = uilabel(panelDropdown, 'Text', '2. Select Metric:', 'Position', [240, 10, 110, 22], 'FontWeight', 'bold');
-    ddCorrMetric = uidropdown(panelDropdown, 'Position', [350, 10, 250, 22], ...
+    lblDrop = uilabel(panelDropdown, 'Text', 'Select Metric to Correlate:', 'Position', [10, 10, 180, 22], 'FontWeight', 'bold');
+    ddCorrMetric = uidropdown(panelDropdown, 'Position', [195, 10, 280, 22], ...
         'ValueChangedFcn', @(~,~) on_metric_changed());
         
     axCorr = uiaxes(gridCorr);
@@ -205,7 +187,7 @@ function oct_dashboard()
     end
 
     function update_metric_dropdown()
-        eye = ddEye.Value; % 'OD' or 'OS'
+        eye = char(ddEyeSelect.Value); % 'OD' or 'OS'
         
         % Generate the clean display names
         dispNames = {'Left ROI: Median L1', 'Left ROI: Median L2', 'Left ROI: Median L3', 'Left ROI: Median L4', 'Left ROI: Median L5', ...
@@ -250,29 +232,6 @@ function oct_dashboard()
         efThicknessOS.Value = thOS;
         
         taNotes.Value = {char(vRow.Notes)};
-        
-        % Status badge based on thickness OD
-        th = vRow.CentralThickness_OD;
-        if th >= 400
-            lblStatus.Text = 'Active Flare-up (Edema)';
-            lblStatus.FontColor = [0.85 0.2 0.2];
-        elseif th >= 300
-            lblStatus.Text = 'Pre-recurrence / Mild';
-            lblStatus.FontColor = [0.8 0.5 0.1];
-        else
-            lblStatus.Text = 'Remission / Normal';
-            lblStatus.FontColor = [0.15 0.6 0.2];
-        end
-        
-        % Slices mini-table
-        subScans = ScansData(ScansData.VisitNum == currVisitNum & ScansData.EyeSide == "OD", :);
-        if ~isempty(subScans)
-            displayTbl = table(subScans.ImageIndex, subScans.Ratio_Left_L4_L5, subScans.RateOfChange_Left, ...
-                'VariableNames', {'Slice', 'Left_L4_L5', 'RateOfChange'});
-            tblSlices.Data = displayTbl;
-        else
-            tblSlices.Data = table();
-        end
     end
 
     function on_save_visit()
@@ -472,10 +431,14 @@ function oct_dashboard()
     function render_all_visits_table()
         if isempty(SummaryData), return; end
         
-        % Dynamically select valid columns based on updated DB structure (Now checking Median)
+        currEye = string(ddEyeSelect.Value);
+        thCol  = sprintf('CentralThickness_%s', currEye);
+        l4Col  = sprintf('Median_%s_Left_L4', currEye);
+        ratCol = sprintf('Median_%s_Left_Ratio_L4_L5', currEye);
+        rocCol = sprintf('Median_%s_Left_RateOfChange', currEye);
+
         desiredCols = {'VisitNum', 'VisitDate', 'DaysFromBaseline', ...
-                       'CentralThickness_OD', 'Median_Left_L4', ...
-                       'Median_Ratio_L4_L5', 'Median_RateOfChange_Left', 'Notes'};
+                       thCol, l4Col, ratCol, rocCol, 'Notes'};
                        
         actualCols = desiredCols(ismember(desiredCols, SummaryData.Properties.VariableNames));
         
@@ -490,11 +453,19 @@ function oct_dashboard()
         selected_metric = ddCorrMetric.Value;
         
         % Compute correlation for this specific metric
-        targetEye = ddEyeSelect.Value; 
+        targetEye = string(ddEyeSelect.Value); 
         corrs = compute_statistics('correlations', selected_metric, targetEye);
         
-        valid = ~isnan(SummaryData.CentralThickness_OD) & ~isnan(SummaryData.(selected_metric));
-        xTh = SummaryData.CentralThickness_OD(valid);
+        if targetEye == "OD"
+            th_all = SummaryData.CentralThickness_OD;
+            th_label = 'Central Retinal Thickness OD (\mum)';
+        else
+            th_all = SummaryData.CentralThickness_OS;
+            th_label = 'Central Retinal Thickness OS (\mum)';
+        end
+
+        valid = ~isnan(th_all) & ~isnan(SummaryData.(selected_metric));
+        xTh = th_all(valid);
         yRatio = SummaryData.(selected_metric)(valid);
         
         hold(axCorr, 'on');
@@ -508,10 +479,10 @@ function oct_dashboard()
             plot(axCorr, xLine, yLine, 'r-', 'LineWidth', 1.8);
         end
         
-        xlabel(axCorr, 'Central Retinal Thickness OD (\mum)', 'FontWeight', 'bold');
+        xlabel(axCorr, th_label, 'FontWeight', 'bold');
         ylabel(axCorr, strrep(selected_metric, '_', ' '), 'FontWeight', 'bold');
-        title(axCorr, sprintf('Scatter Correlation: Thickness vs %s (r = %.3f)', ...
-            strrep(selected_metric, '_', ' '), corrs.Pearson_r), 'FontWeight', 'bold');
+        title(axCorr, sprintf('Scatter Correlation: %s vs %s (r = %.3f)', ...
+            th_label, strrep(selected_metric, '_', ' '), corrs.Pearson_r), 'FontWeight', 'bold');
         grid(axCorr, 'on'); box(axCorr, 'on');
         hold(axCorr, 'off');
         
