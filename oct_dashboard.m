@@ -465,24 +465,28 @@ function oct_dashboard()
         end
 
         valid = ~isnan(th_all) & ~isnan(SummaryData.(selected_metric));
-        xTh = th_all(valid);
-        yRatio = SummaryData.(selected_metric)(valid);
+        xMetric = SummaryData.(selected_metric)(valid);
+        yTh = th_all(valid);
+        metric_label = strrep(selected_metric, '_', ' ');
         
         hold(axCorr, 'on');
-        scatter(axCorr, xTh, yRatio, 55, [0.2 0.4 0.75], 'filled', 'MarkerEdgeColor', 'k');
+        scatter(axCorr, xMetric, yTh, 55, [0.2 0.4 0.75], 'filled', 'MarkerEdgeColor', 'k');
         
-        % Fit line
-        if length(xTh) > 1
-            p = polyfit(xTh, yRatio, 1);
-            xLine = linspace(min(xTh)-20, max(xTh)+20, 100);
+        % Fit regression line (Predicting Thickness from Speckle Biomarker)
+        if length(xMetric) > 1
+            p = polyfit(xMetric, yTh, 1);
+            xRange = max(xMetric) - min(xMetric);
+            if xRange == 0, xRange = 0.1; end
+            xMargin = xRange * 0.08;
+            xLine = linspace(min(xMetric) - xMargin, max(xMetric) + xMargin, 100);
             yLine = polyval(p, xLine);
             plot(axCorr, xLine, yLine, 'r-', 'LineWidth', 1.8);
         end
         
-        xlabel(axCorr, th_label, 'FontWeight', 'bold');
-        ylabel(axCorr, strrep(selected_metric, '_', ' '), 'FontWeight', 'bold');
-        title(axCorr, sprintf('Scatter Correlation: %s vs %s (r = %.3f)', ...
-            th_label, strrep(selected_metric, '_', ' '), corrs.Pearson_r), 'FontWeight', 'bold');
+        xlabel(axCorr, metric_label, 'FontWeight', 'bold');
+        ylabel(axCorr, th_label, 'FontWeight', 'bold');
+        title(axCorr, sprintf('Biomarker Prediction: %s vs. %s (r = %.3f)', ...
+            metric_label, th_label, corrs.Pearson_r), 'FontWeight', 'bold');
         grid(axCorr, 'on'); box(axCorr, 'on');
         hold(axCorr, 'off');
         

@@ -16,7 +16,7 @@ function varargout = compute_statistics(varargin)
         case 'update_all'
             varargout{1} = update_all_metrics();
         case 'correlations' 
-            target = 'Median_Ratio_Left_L4_L5'; 
+            target = 'Median_OD_Left_Ratio_L4_L5'; 
             targetEye = 'OD';
             if length(varargin)>1, target=varargin{2}; end
             if length(varargin)>2, targetEye=varargin{3}; end
@@ -131,7 +131,7 @@ function statsOut = compute_correlations(target_metric, targetEye)
     
     [r_pearson, p_pearson] = corr(th_valid, target_data, 'Type', 'Pearson');
     [r_spearman, p_spearman] = corr(th_valid, target_data, 'Type', 'Spearman');
-    mdl = fitlm(th_valid, target_data);
+    mdl = fitlm(target_data, th_valid);
     
     statsOut = struct('MetricName', strrep(target_metric, '_', ' '), 'N', sum(validPairs), ...
                       'Pearson_r', r_pearson, 'Pearson_p', p_pearson, ...
