@@ -32,76 +32,89 @@ function varargout = compute_statistics(varargin)
     end
 end
 
-%% 1. Recompute All Derived Metrics (Ratios, Rates of Change, Aggregates)
+%% Recompute All Derived Metrics (Ratios, Rates of Change, Aggregates)
+%% Recompute All Derived Metrics (Ratios, Rates of Change, Aggregates)
 function Summary = update_all_metrics()
     Visits = db_manager('get_visits');
     Scans  = db_manager('get_scans');
-
     if isempty(Visits) || isempty(Scans)
         warning('Database is empty. Run migrate_excel_to_db first.');
         Summary = table();
         return;
     end
-
+    
     % Ensure sorted by visit number and image index
     Visits = sortrows(Visits, 'VisitNum');
     Scans  = sortrows(Scans, {'VisitNum', 'EyeSide', 'ImageIndex'});
-
     numVisits = height(Visits);
-
+    
     % Compute per-scan ratios
     for s = 1:height(Scans)
-        % Left L4/L5 ratio
+        % Legacy Left & Right L4/L5 ratio
         if ~isnan(Scans.ROI_Left_L4(s)) && ~isnan(Scans.ROI_Left_L5(s)) && Scans.ROI_Left_L5(s) ~= 0
             Scans.Ratio_Left_L4_L5(s) = Scans.ROI_Left_L4(s) / Scans.ROI_Left_L5(s);
         end
-        % Right L4/L5 ratio
         if ~isnan(Scans.ROI_Right_L4(s)) && ~isnan(Scans.ROI_Right_L5(s)) && Scans.ROI_Right_L5(s) ~= 0
             Scans.Ratio_Right_L4_L5(s) = Scans.ROI_Right_L4(s) / Scans.ROI_Right_L5(s);
         end
+        
+        % NEW: Fixed-width Left & Right L4/L5 ratio
+        if ismember('ROI_Left_L4_fw', Scans.Properties.VariableNames)
+            if ~isnan(Scans.ROI_Left_L4_fw(s)) && ~isnan(Scans.ROI_Left_L5_fw(s)) && Scans.ROI_Left_L5_fw(s) ~= 0
+                Scans.Ratio_Left_L4_L5_fw(s) = Scans.ROI_Left_L4_fw(s) / Scans.ROI_Left_L5_fw(s);
+            end
+            if ~isnan(Scans.ROI_Right_L4_fw(s)) && ~isnan(Scans.ROI_Right_L5_fw(s)) && Scans.ROI_Right_L5_fw(s) ~= 0
+                Scans.Ratio_Right_L4_L5_fw(s) = Scans.ROI_Right_L4_fw(s) / Scans.ROI_Right_L5_fw(s);
+            end
+        end
     end
-
+    
     % Compute Rate of Change per image slice between consecutive visits:
-    % RateOfChange = (Ratio(k, i) - Ratio(k-1, i)) / (Days(k) - Days(k-1))
     for v = 2:numVisits
         vNumCurrent = Visits.VisitNum(v);
         vNumPrev    = Visits.VisitNum(v - 1);
         dtDays = double(days(Visits.VisitDate(v) - Visits.VisitDate(v - 1)));
-
         if dtDays <= 0, continue; end
-
+        
         for eye = ["OD", "OS"]
             currRows = find(Scans.VisitNum == vNumCurrent & Scans.EyeSide == eye);
             prevRows = find(Scans.VisitNum == vNumPrev & Scans.EyeSide == eye);
-
             for i = 1:min(length(currRows), length(prevRows))
                 cIdx = currRows(i);
                 pIdx = prevRows(i);
-
-                % Left rate of change
+                
+                % Legacy rate of change
                 if ~isnan(Scans.Ratio_Left_L4_L5(cIdx)) && ~isnan(Scans.Ratio_Left_L4_L5(pIdx))
                     Scans.RateOfChange_Left(cIdx) = (Scans.Ratio_Left_L4_L5(cIdx) - Scans.Ratio_Left_L4_L5(pIdx)) / dtDays;
                 end
-
-                % Right rate of change
                 if ~isnan(Scans.Ratio_Right_L4_L5(cIdx)) && ~isnan(Scans.Ratio_Right_L4_L5(pIdx))
                     Scans.RateOfChange_Right(cIdx) = (Scans.Ratio_Right_L4_L5(cIdx) - Scans.Ratio_Right_L4_L5(pIdx)) / dtDays;
+                end
+                
+                % NEW: Fixed-width rate of change
+                if ismember('Ratio_Left_L4_L5_fw', Scans.Properties.VariableNames)
+                    if ~isnan(Scans.Ratio_Left_L4_L5_fw(cIdx)) && ~isnan(Scans.Ratio_Left_L4_L5_fw(pIdx))
+                        Scans.RateOfChange_Left_fw(cIdx) = (Scans.Ratio_Left_L4_L5_fw(cIdx) - Scans.Ratio_Left_L4_L5_fw(pIdx)) / dtDays;
+                    end
+                    if ~isnan(Scans.Ratio_Right_L4_L5_fw(cIdx)) && ~isnan(Scans.Ratio_Right_L4_L5_fw(pIdx))
+                        Scans.RateOfChange_Right_fw(cIdx) = (Scans.Ratio_Right_L4_L5_fw(cIdx) - Scans.Ratio_Right_L4_L5_fw(pIdx)) / dtDays;
+                    end
                 end
             end
         end
     end
-
+    
     % Save updated scans back to DB
     dbPath = db_manager('db_path');
     data = load(dbPath);
     data.DB.Scans = Scans;
     save(dbPath, '-struct', 'data', '-v7.3');
-
+    
     % Return summary
     Summary = db_manager('get_summary');
 end
 
-%% 2. Clinical Correlations (Central Thickness vs. Speckle Statistics)
+%% Clinical Correlations (Central Thickness vs. Speckle Statistics)
 function statsOut = compute_correlations(target_metric, targetEye)
     if nargin < 2 || isempty(targetEye), targetEye = "OD"; end
     
@@ -121,7 +134,7 @@ function statsOut = compute_correlations(target_metric, targetEye)
     th_valid = th(validPairs);
     target_data = Summary.(target_metric)(validPairs);
     
-    % --- SAFETY CHECK FOR EMPTY DATA ---
+    % SAFETY CHECK FOR EMPTY DATA 
     if length(th_valid) < 2
         statsOut = struct('MetricName', strrep(target_metric, '_', ' '), 'N', 0, ...
                           'Pearson_r', NaN, 'Pearson_p', NaN, ...
@@ -138,7 +151,7 @@ function statsOut = compute_correlations(target_metric, targetEye)
                       'Spearman_rho', r_spearman, 'Spearman_p', p_spearman, 'R_squared', mdl.Rsquared.Ordinary);
 end
 
-%% 3. Publication-Grade Longitudinal Plot
+%% Publication-Grade Longitudinal Plot
 function hFig = plot_longitudinal(savePath)
     Summary = db_manager('get_summary');
     if isempty(Summary), error('No summary data found.'); end
@@ -233,7 +246,7 @@ function hFig = plot_longitudinal(savePath)
     end
 end
 
-%% 4. Print Summary Report
+%% Print Summary Report
 function reportStr = print_stats_report()
     Summary = db_manager('get_summary');
     corrs = compute_correlations();

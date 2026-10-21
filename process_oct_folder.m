@@ -46,7 +46,7 @@ function visitNum = process_oct_folder(folderPath, options)
     % Ensure indices are within bounds
     targetIndices = targetIndices(targetIndices >= 1 & targetIndices <= numFiles);
 
-    %% 1. Metadata Extraction (Date, Eye Side, Visit Number)
+    %% Metadata Extraction (Date, Eye Side, Visit Number)
     [extractedDate, extractedEye] = parse_folder_metadata(folderName);
 
     % Resolve Eye Side
@@ -100,31 +100,37 @@ function visitNum = process_oct_folder(folderPath, options)
         visitNum, datestr(visitDate, 'yyyy-mm-dd'), eyeSide, mat2str(targetIndices));
     fprintf('====================================================\n');
 
-    %% 2. Process Target Slices
+    %% Process Target Slices
     for i = 1:length(targetIndices)
         idx = targetIndices(i);
         fileName = fileList(idx).name;
         fprintf('  --> Processing Slice %d of %d (Index %d): %s\n', i, length(targetIndices), idx, fileName);
 
         try
-            % 1. Preprocess & Align
+            % Preprocess & Align
             [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = ...
                 preprocess_OCT(folderPath, fileName, MODEL);
 
-            % 2. Segment ILM
+            % Segment ILM
             [Layer_ILM, h1] = segment_ILM(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, options.plotoption);
 
-            % 3. Detect Macular Hole
+            % Detect Macular Hole
             [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = ...
                 detect_hole(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, Layer_ILM, options.plotoption, h1);
 
-            % 4. Segment Remaining Layers
+            % Segment Remaining Layers
             [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top] = ...
                 segment_layers(I_crop_aligned, MODEL, sy, sx, MaxPH, indMaxPH, Layer_ILM, Mask_Hole, options.plotoption, h1);
 
-            % 5. Extract ROIs & Calculate Speckle Stats
+            % Extract ROIs & Calculate Speckle Stats
             [STATS_Full, STATS_Right, STATS_Left] = ...
                 analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
+                             sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
+                             Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
+                             
+            % Extract ROIs & Calculate Speckle Stats (New Fixed 120px Width)
+            [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw] = ...
+                analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
                              Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
 
@@ -133,7 +139,7 @@ function visitNum = process_oct_folder(folderPath, options)
                 close all hidden;
             end
 
-            % 6. Assemble Scan Record
+            % Assemble Scan Record
             scanRecord = struct();
             scanRecord.VisitNum = visitNum;
             scanRecord.ImageIndex = i; % 1, 2, 3
@@ -158,6 +164,23 @@ function visitNum = process_oct_folder(folderPath, options)
                 if isfield(STATS_Left, 'L5') && ~isempty(STATS_Left.L5), scanRecord.ROI_Left_L5 = STATS_Left.L5.CR; end
             end
 
+            % Fixed Width Right ROIs
+            if ~isempty(STATS_Right_fw) && isstruct(STATS_Right_fw)
+                if isfield(STATS_Right_fw, 'R1') && ~isempty(STATS_Right_fw.R1), scanRecord.ROI_Right_L1_fw = STATS_Right_fw.R1.CR; end
+                if isfield(STATS_Right_fw, 'R2') && ~isempty(STATS_Right_fw.R2), scanRecord.ROI_Right_L2_fw = STATS_Right_fw.R2.CR; end
+                if isfield(STATS_Right_fw, 'R3') && ~isempty(STATS_Right_fw.R3), scanRecord.ROI_Right_L3_fw = STATS_Right_fw.R3.CR; end
+                if isfield(STATS_Right_fw, 'R4') && ~isempty(STATS_Right_fw.R4), scanRecord.ROI_Right_L4_fw = STATS_Right_fw.R4.CR; end
+                if isfield(STATS_Right_fw, 'R5') && ~isempty(STATS_Right_fw.R5), scanRecord.ROI_Right_L5_fw = STATS_Right_fw.R5.CR; end
+            end
+            % Fixed Width Left ROIs
+            if ~isempty(STATS_Left_fw) && isstruct(STATS_Left_fw)
+                if isfield(STATS_Left_fw, 'L1') && ~isempty(STATS_Left_fw.L1), scanRecord.ROI_Left_L1_fw = STATS_Left_fw.L1.CR; end
+                if isfield(STATS_Left_fw, 'L2') && ~isempty(STATS_Left_fw.L2), scanRecord.ROI_Left_L2_fw = STATS_Left_fw.L2.CR; end
+                if isfield(STATS_Left_fw, 'L3') && ~isempty(STATS_Left_fw.L3), scanRecord.ROI_Left_L3_fw = STATS_Left_fw.L3.CR; end
+                if isfield(STATS_Left_fw, 'L4') && ~isempty(STATS_Left_fw.L4), scanRecord.ROI_Left_L4_fw = STATS_Left_fw.L4.CR; end
+                if isfield(STATS_Left_fw, 'L5') && ~isempty(STATS_Left_fw.L5), scanRecord.ROI_Left_L5_fw = STATS_Left_fw.L5.CR; end
+            end
+
             % Full Width ROIs
             if isstruct(STATS_Full)
                 if isfield(STATS_Full, 'Layer1') && ~isempty(STATS_Full.Layer1), scanRecord.ROI_Full_L1 = STATS_Full.Layer1.CR; end
@@ -176,13 +199,13 @@ function visitNum = process_oct_folder(folderPath, options)
         end
     end
 
-    %% 3. Automatically Update All Longitudinal Statistics in DB
+    %% Automatically Update All Longitudinal Statistics in DB
     fprintf('\nUpdating longitudinal statistics and rates of change across visits...\n');
     compute_statistics('update_all');
     fprintf('Folder processing complete! Database updated for Visit #%d.\n\n', visitNum);
 end
 
-%% Helper: Parse Date and Eye Side from Folder Name
+%% Parse Date and Eye Side from Folder Name
 function [vDate, eyeSide] = parse_folder_metadata(folderName)
     % Default fallbacks
     vDate = datetime('today');

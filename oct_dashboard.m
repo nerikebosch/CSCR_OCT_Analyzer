@@ -16,19 +16,22 @@ function oct_dashboard()
     mainGrid.RowHeight = {55, '1x'};
     mainGrid.Padding = [10, 10, 10, 10];
     mainGrid.RowSpacing = 8;
-    %% 1. Header Bar
+    %% Header Bar
     headerPanel = uipanel(mainGrid, 'BackgroundColor', [0.15 0.22 0.35], 'BorderType', 'none');
-    headerGrid = uigridlayout(headerPanel, [1, 5]); % 5 columns
-    headerGrid.ColumnWidth = {'1x', 180, 140, 130, 110};
+    headerGrid = uigridlayout(headerPanel, [1, 6]); % 6 columns
+    headerGrid.ColumnWidth = {'1x', 180, 160, 140, 130, 110};
     headerGrid.Padding = [12, 6, 12, 6];
     
     titleLabel = uilabel(headerGrid, ...
         'Text', 'OCT Clinical Study Dashboard  |  Patient CSCR_M_011', ...
         'FontSize', 16, 'FontWeight', 'bold', 'FontColor', [1 1 1]);
-        
-    % NEW EYE SELECTOR DROPDOWN
+       
     ddEyeSelect = uidropdown(headerGrid, 'Items', {'Right Eye (OD - Diseased)', 'Left Eye (OS - Healthy)'}, ...
         'ItemsData', {'OD', 'OS'}, 'FontWeight', 'bold', ...
+        'ValueChangedFcn', @(~,~) refresh_all_data());
+
+    ddRoiMode = uidropdown(headerGrid, 'Items', {'Legacy ROI (Wide)', 'Fixed-Width ROI (120px)'}, ...
+        'ItemsData', {'legacy', 'fw'}, 'FontWeight', 'bold', ...
         'ValueChangedFcn', @(~,~) refresh_all_data());
         
     btnProcess = uibutton(headerGrid, 'push', 'Text', '+ Process Folder', ...
@@ -42,7 +45,7 @@ function oct_dashboard()
         'Text', 'Refresh', ...
         'BackgroundColor', [0.3 0.35 0.45], 'FontColor', [1 1 1], ...
         'ButtonPushedFcn', @(~,~) refresh_all_data());
-    %% 2. Content Area Grid (Left: Sidebar, Right: Tabs)
+    %% Content Area Grid (Left: Sidebar, Right: Tabs)
     contentGrid = uigridlayout(mainGrid, [1, 2]);
     contentGrid.ColumnWidth = {330, '1x'};
     contentGrid.Padding = [0, 0, 0, 0];
@@ -88,6 +91,7 @@ function oct_dashboard()
     btnAddVisit.Layout.Column = [1 2];
     lblDbStatus = uilabel(sideGrid, 'Text', 'Database: Connected', 'FontSize', 9, 'FontColor', [0.4 0.4 0.4]);
     lblDbStatus.Layout.Column = [1 2];
+
     %% Right Area: Tab Group
     tabGroup = uitabgroup(contentGrid);
     % Tab 1: Longitudinal Trends
@@ -188,26 +192,47 @@ function oct_dashboard()
 
     function update_metric_dropdown()
         eye = char(ddEyeSelect.Value); % 'OD' or 'OS'
+        mode = char(ddRoiMode.Value);  % 'legacy' or 'fw'
+        sfx = '';
+        if strcmp(mode, 'fw')
+            sfx = '_fw';
+        end
         
-        % Generate the clean display names
+        % 1. Remember what the user was currently looking at
+        curr_val = char(ddCorrMetric.Value);
+        
         dispNames = {'Left ROI: Median L1', 'Left ROI: Median L2', 'Left ROI: Median L3', 'Left ROI: Median L4', 'Left ROI: Median L5', ...
                      'Left ROI: Ratio L1/L2', 'Left ROI: Ratio L2/L3', 'Left ROI: Ratio L3/L4', 'Left ROI: Ratio L4/L5', 'Left ROI: Ratio L1/L5', ...
                      'Right ROI: Median L1', 'Right ROI: Median L2', 'Right ROI: Median L3', 'Right ROI: Median L4', 'Right ROI: Median L5', ...
                      'Right ROI: Ratio L1/L2', 'Right ROI: Ratio L2/L3', 'Right ROI: Ratio L3/L4', 'Right ROI: Ratio L4/L5', 'Right ROI: Ratio L1/L5'};
                      
-        % Generate the exact DB Variable names that match the eye selected
         dbVars = { ...
-            sprintf('Median_%s_Left_L1', eye), sprintf('Median_%s_Left_L2', eye), sprintf('Median_%s_Left_L3', eye), sprintf('Median_%s_Left_L4', eye), sprintf('Median_%s_Left_L5', eye), ...
-            sprintf('Median_%s_Left_Ratio_L1_L2', eye), sprintf('Median_%s_Left_Ratio_L2_L3', eye), sprintf('Median_%s_Left_Ratio_L3_L4', eye), sprintf('Median_%s_Left_Ratio_L4_L5', eye), sprintf('Median_%s_Left_Ratio_L1_L5', eye), ...
-            sprintf('Median_%s_Right_L1', eye), sprintf('Median_%s_Right_L2', eye), sprintf('Median_%s_Right_L3', eye), sprintf('Median_%s_Right_L4', eye), sprintf('Median_%s_Right_L5', eye), ...
-            sprintf('Median_%s_Right_Ratio_L1_L2', eye), sprintf('Median_%s_Right_Ratio_L2_L3', eye), sprintf('Median_%s_Right_Ratio_L3_L4', eye), sprintf('Median_%s_Right_Ratio_L4_L5', eye), sprintf('Median_%s_Right_Ratio_L1_L5', eye) ...
+            sprintf('Median_%s_Left_L1%s', eye, sfx), sprintf('Median_%s_Left_L2%s', eye, sfx), sprintf('Median_%s_Left_L3%s', eye, sfx), sprintf('Median_%s_Left_L4%s', eye, sfx), sprintf('Median_%s_Left_L5%s', eye, sfx), ...
+            sprintf('Median_%s_Left_Ratio_L1_L2%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L2_L3%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L3_L4%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L1_L5%s', eye, sfx), ...
+            sprintf('Median_%s_Right_L1%s', eye, sfx), sprintf('Median_%s_Right_L2%s', eye, sfx), sprintf('Median_%s_Right_L3%s', eye, sfx), sprintf('Median_%s_Right_L4%s', eye, sfx), sprintf('Median_%s_Right_L5%s', eye, sfx), ...
+            sprintf('Median_%s_Right_Ratio_L1_L2%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L2_L3%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L3_L4%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L4_L5%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L1_L5%s', eye, sfx) ...
         };
         
         ddCorrMetric.Items = dispNames;
         ddCorrMetric.ItemsData = dbVars;
         
-        % Force default to L3/L4 Ratio to save time
-        ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L3_L4', eye); 
+        % 2. Intelligently reconstruct their selection for the new mode/eye
+        if isempty(curr_val)
+            ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx); 
+        else
+            % Strip old eye and mode tags to get the "core" metric name
+            core_metric = strrep(strrep(strrep(curr_val, 'OD_', ''), 'OS_', ''), '_fw', '');
+            
+            % Reattach the newly selected eye and mode tags
+            new_target = strrep(core_metric, 'Median_', sprintf('Median_%s_', eye));
+            new_target = [new_target, sfx];
+            
+            if ismember(new_target, dbVars)
+                ddCorrMetric.Value = new_target;
+            else
+                ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx); 
+            end
+        end
         
         on_metric_changed();
     end
@@ -359,7 +384,7 @@ function oct_dashboard()
         xLimits = [min(visits)-0.5, max(visits)+0.5];
         hold(axEvolution, 'on');
         
-        % 1. Background Clinical Bands
+        % Background Clinical Bands
         if cbZones.Value
             patch(axEvolution, [xLimits(1), xLimits(2), xLimits(2), xLimits(1)], [0.4, 0.4, 0.75, 0.75], ...
                 [1 0.9 0.9], 'EdgeColor', 'none', 'FaceAlpha', 0.6, 'HandleVisibility', 'off');
@@ -369,7 +394,7 @@ function oct_dashboard()
                 [0.9 1 0.9], 'EdgeColor', 'none', 'FaceAlpha', 0.6, 'HandleVisibility', 'off');
         end
         
-        % 2. Left Axis: Selected Metric
+        % Left Axis: Selected Metric
         yyaxis(axEvolution, 'left');
         hEB = plot(axEvolution, visits, ratio_mean, 'o-', ...
             'Color', [0.15 0.3 0.75], 'MarkerSize', 6, 'MarkerFaceColor', [0.35 0.55 0.95], ...
@@ -382,7 +407,7 @@ function oct_dashboard()
             ylim(axEvolution, [min(ratio_mean)*0.8, max(ratio_mean)*1.2]);
         end
         
-        % 3. Right Axis: Central Thickness OD
+        % Right Axis: Central Thickness OD
         yyaxis(axEvolution, 'right');
         if cbThickness.Value
             validTh = ~isnan(th_data);
@@ -404,7 +429,7 @@ function oct_dashboard()
         legend(axEvolution, 'Location', 'northwest');
         hold(axEvolution, 'off');
         
-        % 4. Rate of Change Velocity Bar Chart (Bottom Axes)
+        % Rate of Change Velocity Bar Chart (Bottom Axes)
         hold(axVelocity, 'on');
         plot(axVelocity, xLimits, [0 0], 'k--', 'LineWidth', 1, 'HandleVisibility', 'off');
         barColors = zeros(length(visits), 3);

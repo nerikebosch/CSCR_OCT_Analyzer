@@ -173,6 +173,6 @@ function [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = detect_hole(I_crop, MODEL
         
         MaxPH = round(sy / 2); 
         
-        % Force flag to true so it always generates Left and Right ROIs!
+        % Force flag to true so it always generates Left and Right ROIs
         is_hole_found = true; 
     end

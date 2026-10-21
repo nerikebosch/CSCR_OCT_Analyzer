@@ -68,180 +68,239 @@ function varargout = db_manager(action, varargin)
     end
 end
 
-%% Internal DB Functions
+%% ======================================================================
+%  Internal DB Functions
+%  ======================================================================
 
 function DB = init_db(dbPath)
     if isfile(dbPath)
         data = load(dbPath);
         DB = data.DB;
+        DB = migrate_fw_columns(DB, dbPath);   % no-op on v1.1+ databases
         fprintf('Loaded existing OCT Study Database from: %s\n', dbPath);
         return;
     end
 
-    % Create empty typed tables
+    % ---- Visits table --------------------------------------------------
     Visits = table( ...
-        zeros(0,1,'int32'), ...       % VisitNum
-        datetime.empty(0,1), ...      % VisitDate
-        zeros(0,1,'double'), ...      % DaysFromBaseline
-        zeros(0,1,'double'), ...      % CentralThickness_OD
-        zeros(0,1,'double'), ...      % CentralThickness_OS
-        strings(0,1), ...             % Notes
-        'VariableNames', {'VisitNum', 'VisitDate', 'DaysFromBaseline', ...
-                          'CentralThickness_OD', 'CentralThickness_OS', 'Notes'});
+        zeros(0,1,'int32'), ...
+        datetime.empty(0,1), ...
+        zeros(0,1,'double'), ...
+        zeros(0,1,'double'), ...
+        zeros(0,1,'double'), ...
+        strings(0,1), ...
+        'VariableNames', {'VisitNum','VisitDate','DaysFromBaseline', ...
+                          'CentralThickness_OD','CentralThickness_OS','Notes'});
 
+    % ---- Scans table ---------------------------------------------------
+    z = @() zeros(0,1,'double');
     Scans = table( ...
-        zeros(0,1,'int32'), ...       % ScanID
-        zeros(0,1,'int32'), ...       % VisitNum
-        zeros(0,1,'int32'), ...       % ImageIndex (1, 2, 3)
-        strings(0,1), ...             % EyeSide ('OD' or 'OS')
-        strings(0,1), ...             % FileName
-        zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), ... % ROI_Right_L1..L5
-        zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), ... % ROI_Left_L1..L5
-        zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), zeros(0,1,'double'), ... % ROI_Full_L1..L5
-        zeros(0,1,'double'), ...      % Ratio_Left_L4_L5
-        zeros(0,1,'double'), ...      % Ratio_Right_L4_L5
-        zeros(0,1,'double'), ...      % RateOfChange_Left
-        zeros(0,1,'double'), ...      % RateOfChange_Right
-        'VariableNames', {'ScanID', 'VisitNum', 'ImageIndex', 'EyeSide', 'FileName', ...
-                          'ROI_Right_L1', 'ROI_Right_L2', 'ROI_Right_L3', 'ROI_Right_L4', 'ROI_Right_L5', ...
-                          'ROI_Left_L1',  'ROI_Left_L2',  'ROI_Left_L3',  'ROI_Left_L4',  'ROI_Left_L5', ...
-                          'ROI_Full_L1',  'ROI_Full_L2',  'ROI_Full_L3',  'ROI_Full_L4',  'ROI_Full_L5', ...
-                          'Ratio_Left_L4_L5', 'Ratio_Right_L4_L5', ...
-                          'RateOfChange_Left', 'RateOfChange_Right'});
+        zeros(0,1,'int32'),  zeros(0,1,'int32'), zeros(0,1,'int32'), ...
+        strings(0,1), strings(0,1), ...
+        z(),z(),z(),z(),z(), ...   % ROI_Right_L1..L5
+        z(),z(),z(),z(),z(), ...   % ROI_Left_L1..L5
+        z(),z(),z(),z(),z(), ...   % ROI_Full_L1..L5
+        z(), z(), z(), z(), ...    % Ratio_Left/Right, RoC_Left/Right  (legacy)
+        z(),z(),z(),z(),z(), ...   % ROI_Right_L1_fw..L5_fw
+        z(),z(),z(),z(),z(), ...   % ROI_Left_L1_fw..L5_fw
+        z(),z(),z(),z(),z(), ...   % ROI_Full_L1_fw..L5_fw
+        z(), z(), z(), z(), ...    % Ratio_Left/Right_fw, RoC_Left/Right_fw
+        'VariableNames', { ...
+            'ScanID','VisitNum','ImageIndex','EyeSide','FileName', ...
+            'ROI_Right_L1','ROI_Right_L2','ROI_Right_L3','ROI_Right_L4','ROI_Right_L5', ...
+            'ROI_Left_L1', 'ROI_Left_L2', 'ROI_Left_L3', 'ROI_Left_L4', 'ROI_Left_L5', ...
+            'ROI_Full_L1', 'ROI_Full_L2', 'ROI_Full_L3', 'ROI_Full_L4', 'ROI_Full_L5', ...
+            'Ratio_Left_L4_L5','Ratio_Right_L4_L5','RateOfChange_Left','RateOfChange_Right', ...
+            'ROI_Right_L1_fw','ROI_Right_L2_fw','ROI_Right_L3_fw','ROI_Right_L4_fw','ROI_Right_L5_fw', ...
+            'ROI_Left_L1_fw', 'ROI_Left_L2_fw', 'ROI_Left_L3_fw', 'ROI_Left_L4_fw', 'ROI_Left_L5_fw', ...
+            'ROI_Full_L1_fw', 'ROI_Full_L2_fw', 'ROI_Full_L3_fw', 'ROI_Full_L4_fw', 'ROI_Full_L5_fw', ...
+            'Ratio_Left_L4_L5_fw','Ratio_Right_L4_L5_fw', ...
+            'RateOfChange_Left_fw','RateOfChange_Right_fw'});
 
-    DB = struct('Visits', Visits, 'Scans', Scans, 'Created', datetime('now'), 'Version', '1.0');
+    DB = struct('Visits', Visits, 'Scans', Scans, ...
+                'Created', datetime('now'), 'Version', '1.1');
     save(dbPath, 'DB', '-v7.3');
-    fprintf('Created new OCT Study Database at: %s\n', dbPath);
+    fprintf('Created new OCT Study Database (v1.1) at: %s\n', dbPath);
 end
 
+% --------------------------------------------------------------------------
+function DB = migrate_fw_columns(DB, dbPath)
+% Silently adds the 19 fixed-width columns if they are missing (v1.0 -> v1.1).
+    fw_cols = { ...
+        'ROI_Right_L1_fw','ROI_Right_L2_fw','ROI_Right_L3_fw','ROI_Right_L4_fw','ROI_Right_L5_fw', ...
+        'ROI_Left_L1_fw', 'ROI_Left_L2_fw', 'ROI_Left_L3_fw', 'ROI_Left_L4_fw', 'ROI_Left_L5_fw', ...
+        'ROI_Full_L1_fw', 'ROI_Full_L2_fw', 'ROI_Full_L3_fw', 'ROI_Full_L4_fw', 'ROI_Full_L5_fw', ...
+        'Ratio_Left_L4_L5_fw','Ratio_Right_L4_L5_fw', ...
+        'RateOfChange_Left_fw','RateOfChange_Right_fw'};
+
+    changed = false;
+    nRows = height(DB.Scans);
+    for c = 1:length(fw_cols)
+        if ~ismember(fw_cols{c}, DB.Scans.Properties.VariableNames)
+            DB.Scans.(fw_cols{c}) = NaN(nRows, 1);
+            changed = true;
+        end
+    end
+
+    if changed
+        DB.Version = '1.1';
+        data.DB = DB; %#ok<STRNU>
+        save(dbPath, '-struct', 'data', '-v7.3');
+        fprintf('Database migrated to v1.1: fixed-width ROI columns added.\n');
+    end
+end
+
+% --------------------------------------------------------------------------
 function save_visit_record(dbPath, v)
     if ~isfile(dbPath), init_db(dbPath); end
     data = load(dbPath);
     Visits = data.DB.Visits;
-    
-    % Normalize input values
-    vNum = int32(v.VisitNum);
+
+    vNum  = int32(v.VisitNum);
     vDate = v.VisitDate;
     if ~isa(vDate, 'datetime')
         vDate = datetime(vDate, 'InputFormat', 'yyyy-MM-dd');
     end
-    
-    % Update if exists or append
+
     idx = find(Visits.VisitNum == vNum, 1);
     if isempty(idx)
-        % Brand new visit
-        thOD = NaN; if isfield(v, 'CentralThickness_OD') && ~isempty(v.CentralThickness_OD), thOD = double(v.CentralThickness_OD); end
-        thOS = NaN; if isfield(v, 'CentralThickness_OS') && ~isempty(v.CentralThickness_OS), thOS = double(v.CentralThickness_OS); end
-        
-        notesStr = ""; 
-        if isfield(v, 'Notes') && ~isempty(v.Notes)
-            if iscell(v.Notes), notesStr = string(strjoin(v.Notes, ' ')); else, notesStr = string(v.Notes); end
-        end
-        
+        thOD = NaN; if isfield(v,'CentralThickness_OD') && ~isempty(v.CentralThickness_OD), thOD = double(v.CentralThickness_OD); end
+        thOS = NaN; if isfield(v,'CentralThickness_OS') && ~isempty(v.CentralThickness_OS), thOS = double(v.CentralThickness_OS); end
+        notesStr = ""; if isfield(v,'Notes') && ~isempty(v.Notes), notesStr = coerce_string(v.Notes); end
+
         newRow = table(vNum, vDate, 0, thOD, thOS, notesStr, ...
-            'VariableNames', {'VisitNum', 'VisitDate', 'DaysFromBaseline', ...
-                              'CentralThickness_OD', 'CentralThickness_OS', 'Notes'});
+            'VariableNames', {'VisitNum','VisitDate','DaysFromBaseline', ...
+                              'CentralThickness_OD','CentralThickness_OS','Notes'});
         Visits = [Visits; newRow];
     else
-        % Existing visit: Update date, preserve thickness unless provided, update notes safely
         Visits.VisitDate(idx) = vDate;
-        
-        if isfield(v, 'CentralThickness_OD') && ~isempty(v.CentralThickness_OD) && ~isnan(v.CentralThickness_OD)
+        if isfield(v,'CentralThickness_OD') && ~isempty(v.CentralThickness_OD) && ~isnan(v.CentralThickness_OD)
             Visits.CentralThickness_OD(idx) = double(v.CentralThickness_OD);
         end
-        if isfield(v, 'CentralThickness_OS') && ~isempty(v.CentralThickness_OS) && ~isnan(v.CentralThickness_OS)
+        if isfield(v,'CentralThickness_OS') && ~isempty(v.CentralThickness_OS) && ~isnan(v.CentralThickness_OS)
             Visits.CentralThickness_OS(idx) = double(v.CentralThickness_OS);
         end
-        
-        % Unconditionally update notes whenever the field is passed from the UI
-        if isfield(v, 'Notes')
-            if iscell(v.Notes)
-                Visits.Notes(idx) = string(strjoin(v.Notes, ' '));
-            else
-                Visits.Notes(idx) = string(v.Notes);
-            end
+        if isfield(v,'Notes')
+            Visits.Notes(idx) = coerce_string(v.Notes);
         end
     end
-    
-    % Re-sort by visit number and recalculate days from baseline
+
     Visits = sortrows(Visits, 'VisitNum');
     baseDate = Visits.VisitDate(1);
     Visits.DaysFromBaseline = double(days(Visits.VisitDate - baseDate));
-    
+
     data.DB.Visits = Visits;
     save(dbPath, '-struct', 'data', '-v7.3');
 end
 
+% --------------------------------------------------------------------------
 function save_scan_record(dbPath, s)
     if ~isfile(dbPath), init_db(dbPath); end
     data = load(dbPath);
     Scans = data.DB.Scans;
 
-    vNum = int32(s.VisitNum);
+    vNum   = int32(s.VisitNum);
     imgIdx = int32(s.ImageIndex);
-    eyeSide = "OD"; if isfield(s, 'EyeSide') && ~isempty(s.EyeSide), eyeSide = string(s.EyeSide); end
-    fn = ""; if isfield(s, 'FileName') && ~isempty(s.FileName), fn = string(s.FileName); end
+    eyeSide = "OD";  if isfield(s,'EyeSide')   && ~isempty(s.EyeSide),   eyeSide = string(s.EyeSide); end
+    fn      = "";    if isfield(s,'FileName')   && ~isempty(s.FileName),   fn = string(s.FileName); end
 
-    % Helper to extract ROI field
     getCR = @(f) double(get_field_default(s, f, NaN));
 
-    r_r1 = getCR('ROI_Right_L1'); r_r2 = getCR('ROI_Right_L2');
-    r_r3 = getCR('ROI_Right_L3'); r_r4 = getCR('ROI_Right_L4'); r_r5 = getCR('ROI_Right_L5');
+    % Legacy ROI columns
+    r_r1=getCR('ROI_Right_L1'); r_r2=getCR('ROI_Right_L2'); r_r3=getCR('ROI_Right_L3');
+    r_r4=getCR('ROI_Right_L4'); r_r5=getCR('ROI_Right_L5');
+    r_l1=getCR('ROI_Left_L1');  r_l2=getCR('ROI_Left_L2');  r_l3=getCR('ROI_Left_L3');
+    r_l4=getCR('ROI_Left_L4');  r_l5=getCR('ROI_Left_L5');
+    r_f1=getCR('ROI_Full_L1');  r_f2=getCR('ROI_Full_L2');  r_f3=getCR('ROI_Full_L3');
+    r_f4=getCR('ROI_Full_L4');  r_f5=getCR('ROI_Full_L5');
 
-    r_l1 = getCR('ROI_Left_L1');  r_l2 = getCR('ROI_Left_L2');
-    r_l3 = getCR('ROI_Left_L3');  r_l4 = getCR('ROI_Left_L4');  r_l5 = getCR('ROI_Left_L5');
-
-    r_f1 = getCR('ROI_Full_L1');  r_f2 = getCR('ROI_Full_L2');
-    r_f3 = getCR('ROI_Full_L3');  r_f4 = getCR('ROI_Full_L4');  r_f5 = getCR('ROI_Full_L5');
-
-    % Ratios
-    ratio_l = NaN;
-    if ~isnan(r_l4) && ~isnan(r_l5) && r_l5 ~= 0
-        ratio_l = r_l4 / r_l5;
-    end
-    if isfield(s, 'Ratio_Left_L4_L5') && ~isempty(s.Ratio_Left_L4_L5) && ~isnan(s.Ratio_Left_L4_L5)
-        ratio_l = double(s.Ratio_Left_L4_L5);
-    end
-
-    ratio_r = NaN;
-    if ~isnan(r_r4) && ~isnan(r_r5) && r_r5 ~= 0
-        ratio_r = r_r4 / r_r5;
-    end
-    if isfield(s, 'Ratio_Right_L4_L5') && ~isempty(s.Ratio_Right_L4_L5) && ~isnan(s.Ratio_Right_L4_L5)
-        ratio_r = double(s.Ratio_Right_L4_L5);
-    end
-
+    % Legacy ratios
+    ratio_l = compute_ratio(r_l4, r_l5);
+    if isfield(s,'Ratio_Left_L4_L5')  && ~isempty(s.Ratio_Left_L4_L5)  && ~isnan(s.Ratio_Left_L4_L5),  ratio_l = double(s.Ratio_Left_L4_L5);  end
+    ratio_r = compute_ratio(r_r4, r_r5);
+    if isfield(s,'Ratio_Right_L4_L5') && ~isempty(s.Ratio_Right_L4_L5) && ~isnan(s.Ratio_Right_L4_L5), ratio_r = double(s.Ratio_Right_L4_L5); end
     roc_l = getCR('RateOfChange_Left');
     roc_r = getCR('RateOfChange_Right');
 
-    % Check if record exists for this (VisitNum, ImageIndex, EyeSide)
+    % Fixed-width ROI columns
+    fw_r1=getCR('ROI_Right_L1_fw'); fw_r2=getCR('ROI_Right_L2_fw'); fw_r3=getCR('ROI_Right_L3_fw');
+    fw_r4=getCR('ROI_Right_L4_fw'); fw_r5=getCR('ROI_Right_L5_fw');
+    fw_l1=getCR('ROI_Left_L1_fw');  fw_l2=getCR('ROI_Left_L2_fw');  fw_l3=getCR('ROI_Left_L3_fw');
+    fw_l4=getCR('ROI_Left_L4_fw');  fw_l5=getCR('ROI_Left_L5_fw');
+    fw_f1=getCR('ROI_Full_L1_fw');  fw_f2=getCR('ROI_Full_L2_fw');  fw_f3=getCR('ROI_Full_L3_fw');
+    fw_f4=getCR('ROI_Full_L4_fw');  fw_f5=getCR('ROI_Full_L5_fw');
+
+    fw_ratio_l = compute_ratio(fw_l4, fw_l5);
+    if isfield(s,'Ratio_Left_L4_L5_fw')  && ~isempty(s.Ratio_Left_L4_L5_fw)  && ~isnan(s.Ratio_Left_L4_L5_fw),  fw_ratio_l = double(s.Ratio_Left_L4_L5_fw);  end
+    fw_ratio_r = compute_ratio(fw_r4, fw_r5);
+    if isfield(s,'Ratio_Right_L4_L5_fw') && ~isempty(s.Ratio_Right_L4_L5_fw) && ~isnan(s.Ratio_Right_L4_L5_fw), fw_ratio_r = double(s.Ratio_Right_L4_L5_fw); end
+    fw_roc_l = getCR('RateOfChange_Left_fw');
+    fw_roc_r = getCR('RateOfChange_Right_fw');
+
     idx = find(Scans.VisitNum == vNum & Scans.ImageIndex == imgIdx & Scans.EyeSide == eyeSide, 1);
+
     if isempty(idx)
+        % New row — must provide all columns in order
         scanID = int32(height(Scans) + 1);
-        newRow = table(scanID, vNum, imgIdx, eyeSide, fn, ...
-            r_r1, r_r2, r_r3, r_r4, r_r5, ...
-            r_l1, r_l2, r_l3, r_l4, r_l5, ...
-            r_f1, r_f2, r_f3, r_f4, r_f5, ...
-            ratio_l, ratio_r, roc_l, roc_r, ...
-            'VariableNames', Scans.Properties.VariableNames);
+        varNames = Scans.Properties.VariableNames;
+        vals = {scanID, vNum, imgIdx, eyeSide, fn, ...
+                r_r1,r_r2,r_r3,r_r4,r_r5, r_l1,r_l2,r_l3,r_l4,r_l5, ...
+                r_f1,r_f2,r_f3,r_f4,r_f5, ratio_l,ratio_r,roc_l,roc_r, ...
+                fw_r1,fw_r2,fw_r3,fw_r4,fw_r5, fw_l1,fw_l2,fw_l3,fw_l4,fw_l5, ...
+                fw_f1,fw_f2,fw_f3,fw_f4,fw_f5, fw_ratio_l,fw_ratio_r,fw_roc_l,fw_roc_r};
+        newRow = cell2table(vals, 'VariableNames', varNames);
         Scans = [Scans; newRow];
     else
-        Scans.FileName(idx) = fn;
-        Scans.ROI_Right_L1(idx) = r_r1; Scans.ROI_Right_L2(idx) = r_r2;
-        Scans.ROI_Right_L3(idx) = r_r3; Scans.ROI_Right_L4(idx) = r_r4; Scans.ROI_Right_L5(idx) = r_r5;
-        Scans.ROI_Left_L1(idx) = r_l1;   Scans.ROI_Left_L2(idx) = r_l2;
-        Scans.ROI_Left_L3(idx) = r_l3;   Scans.ROI_Left_L4(idx) = r_l4;   Scans.ROI_Left_L5(idx) = r_l5;
-        Scans.ROI_Full_L1(idx) = r_f1;   Scans.ROI_Full_L2(idx) = r_f2;
-        Scans.ROI_Full_L3(idx) = r_f3;   Scans.ROI_Full_L4(idx) = r_f4;   Scans.ROI_Full_L5(idx) = r_f5;
-        Scans.Ratio_Left_L4_L5(idx) = ratio_l;
-        Scans.Ratio_Right_L4_L5(idx) = ratio_r;
-        Scans.RateOfChange_Left(idx) = roc_l;
-        Scans.RateOfChange_Right(idx) = roc_r;
+        % Existing row — only overwrite non-NaN supplied values
+        set_if_valid = @(col, val) setfield_if_valid(Scans, idx, col, val);
+        Scans = set_if_valid('FileName', fn);
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Right_L1','ROI_Right_L2','ROI_Right_L3','ROI_Right_L4','ROI_Right_L5'}, {r_r1,r_r2,r_r3,r_r4,r_r5});
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Left_L1','ROI_Left_L2','ROI_Left_L3','ROI_Left_L4','ROI_Left_L5'}, {r_l1,r_l2,r_l3,r_l4,r_l5});
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Full_L1','ROI_Full_L2','ROI_Full_L3','ROI_Full_L4','ROI_Full_L5'}, {r_f1,r_f2,r_f3,r_f4,r_f5});
+        Scans = update_cols(Scans, idx, ...
+            {'Ratio_Left_L4_L5','Ratio_Right_L4_L5','RateOfChange_Left','RateOfChange_Right'}, {ratio_l,ratio_r,roc_l,roc_r});
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Right_L1_fw','ROI_Right_L2_fw','ROI_Right_L3_fw','ROI_Right_L4_fw','ROI_Right_L5_fw'}, {fw_r1,fw_r2,fw_r3,fw_r4,fw_r5});
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Left_L1_fw','ROI_Left_L2_fw','ROI_Left_L3_fw','ROI_Left_L4_fw','ROI_Left_L5_fw'}, {fw_l1,fw_l2,fw_l3,fw_l4,fw_l5});
+        Scans = update_cols(Scans, idx, ...
+            {'ROI_Full_L1_fw','ROI_Full_L2_fw','ROI_Full_L3_fw','ROI_Full_L4_fw','ROI_Full_L5_fw'}, {fw_f1,fw_f2,fw_f3,fw_f4,fw_f5});
+        Scans = update_cols(Scans, idx, ...
+            {'Ratio_Left_L4_L5_fw','Ratio_Right_L4_L5_fw','RateOfChange_Left_fw','RateOfChange_Right_fw'}, {fw_ratio_l,fw_ratio_r,fw_roc_l,fw_roc_r});
     end
 
-    Scans = sortrows(Scans, {'VisitNum', 'EyeSide', 'ImageIndex'});
+    Scans = sortrows(Scans, {'VisitNum','EyeSide','ImageIndex'});
     data.DB.Scans = Scans;
     save(dbPath, '-struct', 'data', '-v7.3');
+end
+
+% --------------------------------------------------------------------------
+%  Small helpers
+% --------------------------------------------------------------------------
+function r = compute_ratio(num, den)
+    if ~isnan(num) && ~isnan(den) && den ~= 0
+        r = num / den;
+    else
+        r = NaN;
+    end
+end
+
+function T = update_cols(T, idx, cols, vals)
+    for k = 1:length(cols)
+        v = vals{k};
+        if ~isnan(v) || true   % always write (NaN intentionally clears stale values)
+            T.(cols{k})(idx) = v;
+        end
+    end
+end
+
+function T = setfield_if_valid(T, idx, col, val)
+    if ~isempty(val)
+        T.(col)(idx) = val;
+    end
 end
 
 function val = get_field_default(s, fieldName, defaultVal)
@@ -252,6 +311,15 @@ function val = get_field_default(s, fieldName, defaultVal)
     end
 end
 
+function s = coerce_string(v)
+    if iscell(v)
+        s = string(strjoin(v, ' '));
+    else
+        s = string(v);
+    end
+end
+
+% --------------------------------------------------------------------------
 function Visits = get_visits_table(dbPath)
     if ~isfile(dbPath), init_db(dbPath); end
     data = load(dbPath);
@@ -267,106 +335,96 @@ function Scans = get_scans_table(dbPath, visitNum)
     end
 end
 
+% --------------------------------------------------------------------------
 function Summary = get_summary_table(dbPath)
+% Aggregates per-visit metrics across the 3 slices (median).
+% Computes all individual layers and all inter-layer ratios dynamically.
     Visits = get_visits_table(dbPath);
-    Scans = get_scans_table(dbPath, []);
-    numVisits = height(Visits);
-
-    % Define the target column names we will build
-    sides = {'Left', 'Right'};
-    metrics = {'L1', 'L2', 'L3', 'L4', 'L5', 'Ratio_L1_L2', 'Ratio_L2_L3', 'Ratio_L3_L4', 'Ratio_L4_L5', 'Ratio_L1_L5', 'RateOfChange'};
+    Scans  = get_scans_table(dbPath, []);
+    nV     = height(Visits);
+    Summary = Visits;
     
-    % Initialize empty arrays for the table
-    summaryData = struct();
-    for eye = ["OD", "OS"]
-        for s = 1:length(sides)
-            for m = 1:length(metrics)
-                varName = sprintf('Median_%s_%s_%s', eye, sides{s}, metrics{m});
-                summaryData.(varName) = NaN(numVisits, 1);
-            end
-        end
-    end
-
-    for i = 1:numVisits
+    % Pre-allocate the legacy mean/std columns for compute_statistics('plot')
+    Summary.Mean_Ratio_Left_L4_L5 = NaN(nV, 1);
+    Summary.Std_Ratio_Left_L4_L5 = NaN(nV, 1);
+    Summary.Mean_RateOfChange_Left = NaN(nV, 1);
+    
+    for i = 1:nV
         vNum = Visits.VisitNum(i);
         
+        % Process both eyes (OD and OS)
         for eye = ["OD", "OS"]
-            subScans = Scans(Scans.VisitNum == vNum & Scans.EyeSide == eye, :);
-            if isempty(subScans), continue; end
+            sub = Scans(Scans.VisitNum == vNum & Scans.EyeSide == eye, :);
+            if isempty(sub), continue; end
+            
+            % 1. Compute Mean/Std for the standard plot (OD only)
+            if eye == "OD"
+                Summary.Mean_Ratio_Left_L4_L5(i) = mean(sub.Ratio_Left_L4_L5, 'omitnan');
+                if sum(~isnan(sub.Ratio_Left_L4_L5)) > 1
+                    Summary.Std_Ratio_Left_L4_L5(i) = std(sub.Ratio_Left_L4_L5, 'omitnan');
+                else
+                    Summary.Std_Ratio_Left_L4_L5(i) = 0;
+                end
+                Summary.Mean_RateOfChange_Left(i) = mean(sub.RateOfChange_Left, 'omitnan');
+            end
+            
+            % 2. Dynamically calculate medians and ratios for the Dashboard UI
+            sides = {'Left', 'Right'};
+            suffixes = {'', '_fw'};
             
             for s = 1:length(sides)
-                side = sides{s}; % 'Left' or 'Right'
-                
-                % 1. Pool Single Layers (Combines Side ROI + Full ROI to handle mixed slices)
-                for L = 1:5
-                    colSide = sprintf('ROI_%s_L%d', side, L);
-                    colFull = sprintf('ROI_Full_L%d', L);
+                side = sides{s};
+                for fx = 1:length(suffixes)
+                    sfx = suffixes{fx};
                     
-                    pool = [subScans.(colSide)(subScans.(colSide) > 0 & ~isnan(subScans.(colSide))); ...
-                            subScans.(colFull)(subScans.(colFull) > 0 & ~isnan(subScans.(colFull)))];
-                            
-                    if ~isempty(pool)
-                        summaryData.(sprintf('Median_%s_%s_L%d', eye, side, L))(i) = median(pool);
-                    end
-                end
-                
-                % 2. Pool Ratios
-                ratioPairs = [1,2; 2,3; 3,4; 4,5; 1,5];
-                for r = 1:size(ratioPairs, 1)
-                    top = ratioPairs(r, 1); bot = ratioPairs(r, 2);
+                    % Extract the raw slice arrays from the Scans table
+                    if ~ismember(sprintf('ROI_%s_L1%s', side, sfx), sub.Properties.VariableNames), continue; end
+                    L1 = sub.(sprintf('ROI_%s_L1%s', side, sfx));
+                    L2 = sub.(sprintf('ROI_%s_L2%s', side, sfx));
+                    L3 = sub.(sprintf('ROI_%s_L3%s', side, sfx));
+                    L4 = sub.(sprintf('ROI_%s_L4%s', side, sfx));
+                    L5 = sub.(sprintf('ROI_%s_L5%s', side, sfx));
                     
-                    cSideT = sprintf('ROI_%s_L%d', side, top); cSideB = sprintf('ROI_%s_L%d', side, bot);
-                    cFullT = sprintf('ROI_Full_L%d', top);     cFullB = sprintf('ROI_Full_L%d', bot);
+                    % Dashboard Layer Medians
+                    Summary.(sprintf('Median_%s_%s_L1%s', eye, side, sfx))(i) = median(L1, 'omitnan');
+                    Summary.(sprintf('Median_%s_%s_L2%s', eye, side, sfx))(i) = median(L2, 'omitnan');
+                    Summary.(sprintf('Median_%s_%s_L3%s', eye, side, sfx))(i) = median(L3, 'omitnan');
+                    Summary.(sprintf('Median_%s_%s_L4%s', eye, side, sfx))(i) = median(L4, 'omitnan');
+                    Summary.(sprintf('Median_%s_%s_L5%s', eye, side, sfx))(i) = median(L5, 'omitnan');
                     
-                    % Calculate ratio per slice, then pool
-                    vSide = subScans.(cSideT) > 0 & subScans.(cSideB) > 0;
-                    vFull = subScans.(cFullT) > 0 & subScans.(cFullB) > 0;
+                    % Dashboard Inter-Layer Ratios
+                    % Helper to calculate ratio per slice safely, then take the median
+                    calc_ratio = @(num, den) median(num ./ (den + 0./(den ~= 0)), 'omitnan');
                     
-                    poolRat = [subScans.(cSideT)(vSide) ./ subScans.(cSideB)(vSide); ...
-                               subScans.(cFullT)(vFull) ./ subScans.(cFullB)(vFull)];
-                               
-                    if ~isempty(poolRat)
-                        summaryData.(sprintf('Median_%s_%s_Ratio_L%d_L%d', eye, side, top, bot))(i) = median(poolRat);
-                    end
-                end
-                
-                % 3. Rate of change (Currently only calculated for Left/Right in main script)
-                cRoc = sprintf('RateOfChange_%s', side);
-                if ismember(cRoc, subScans.Properties.VariableNames)
-                    roc = subScans.(cRoc)(~isnan(subScans.(cRoc)));
-                    if ~isempty(roc), summaryData.(sprintf('Median_%s_%s_RateOfChange', eye, side))(i) = median(roc); end
+                    Summary.(sprintf('Median_%s_%s_Ratio_L1_L2%s', eye, side, sfx))(i) = calc_ratio(L1, L2);
+                    Summary.(sprintf('Median_%s_%s_Ratio_L2_L3%s', eye, side, sfx))(i) = calc_ratio(L2, L3);
+                    Summary.(sprintf('Median_%s_%s_Ratio_L3_L4%s', eye, side, sfx))(i) = calc_ratio(L3, L4);
+                    Summary.(sprintf('Median_%s_%s_Ratio_L4_L5%s', eye, side, sfx))(i) = calc_ratio(L4, L5);
+                    Summary.(sprintf('Median_%s_%s_Ratio_L1_L5%s', eye, side, sfx))(i) = calc_ratio(L1, L5);
                 end
             end
         end
-    end
-
-    % Convert the struct to table columns and attach to Visits
-    Summary = Visits;
-    fNames = fieldnames(summaryData);
-    for f = 1:length(fNames)
-        Summary.(fNames{f}) = summaryData.(fNames{f});
     end
 end
 
+% --------------------------------------------------------------------------
 function export_csv_tables(dbPath, outDir)
     if ~isfolder(outDir), mkdir(outDir); end
-    Visits = get_visits_table(dbPath);
-    Scans = get_scans_table(dbPath, []);
+    Visits  = get_visits_table(dbPath);
+    Scans   = get_scans_table(dbPath, []);
     Summary = get_summary_table(dbPath);
-
-    writetable(Visits, fullfile(outDir, 'visits.csv'));
-    writetable(Scans, fullfile(outDir, 'scans.csv'));
+    writetable(Visits,  fullfile(outDir, 'visits.csv'));
+    writetable(Scans,   fullfile(outDir, 'scans.csv'));
     writetable(Summary, fullfile(outDir, 'visit_summary.csv'));
     fprintf('Exported CSV database tables to: %s\n', outDir);
 end
 
 function export_excel_tables(dbPath, excelPath)
-    Visits = get_visits_table(dbPath);
-    Scans = get_scans_table(dbPath, []);
+    Visits  = get_visits_table(dbPath);
+    Scans   = get_scans_table(dbPath, []);
     Summary = get_summary_table(dbPath);
-
     writetable(Summary, excelPath, 'Sheet', 'Visit_Summary');
-    writetable(Visits, excelPath, 'Sheet', 'Visits');
-    writetable(Scans, excelPath, 'Sheet', 'Scan_Slices');
+    writetable(Visits,  excelPath, 'Sheet', 'Visits');
+    writetable(Scans,   excelPath, 'Sheet', 'Scan_Slices');
     fprintf('Exported consolidated Excel report to: %s\n', excelPath);
 end
