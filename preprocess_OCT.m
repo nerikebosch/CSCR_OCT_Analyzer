@@ -1,6 +1,22 @@
-function [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = preprocess_OCT(folderPath, fileName, MODEL)
+function [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = preprocess_OCT(folderPath, fileName, MODEL, isLeftEye)
+    % Default fallback if isLeftEye is not passed
+    if nargin < 4, isLeftEye = false; end
+
     fullImagePath = fullfile(folderPath, fileName);
-    I = rgb2gray(imread(fullImagePath)); % this is a 9mm scan 
+    I_raw = imread(fullImagePath);
+    
+    % Convert to grayscale if 3D RGB
+    if size(I_raw, 3) == 3
+        I = rgb2gray(I_raw);
+    else
+        I = I_raw;
+    end
+
+    % FLIP LEFT EYE HORIZONTALLY FOR ANATOMICAL SYMMETRY
+    if isLeftEye
+        I = flip(I, 2);
+        disp('Flipped OS (Left Eye) image horizontally.');
+    end
 
     % Standardize Image Size
     target_sy = 992;
@@ -13,7 +29,6 @@ function [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = 
               ' to ', num2str(target_sx), 'x', num2str(target_sy)]);
         I = imresize(I, [target_sy, target_sx]); 
     end
-
     I = double(I);
     
     % Find estimate of ILM
@@ -43,7 +58,7 @@ function [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = 
     I_orig = I;
     I_aligned = imrotate(I, angle_deg, 'bicubic', 'crop');
     
-    % crop horizontally to a central 6mm scan 
+    % Crop horizontally to a central 6mm scan 
     [sy, sx] = size(I_aligned);
     Margin = round((sx*(1-6/9))/2);
     
@@ -52,24 +67,25 @@ function [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = 
     
     % Update sx to the new 6mm width
     [sy, sx] = size(I_aligned);
-
+    
     % Vertical crop before SAM
     T = multithresh(I_aligned, 3);
     Labels = imquantize(I_aligned, T);
     BW = zeros(size(I_aligned));
-    ind  = Labels==3 | Labels==4;
+    ind = Labels==3 | Labels==4;
     BW(ind) = 1;
-    BW = imopen(imfill(BW,'holes'),strel('disk',3)); 
+    BW = imopen(imfill(BW,'holes'), strel('disk', 3)); 
     
-    [~,Y] = meshgrid(1:sx, 1:sy);
+    [~, Y] = meshgrid(1:sx, 1:sy);
     Y_min = min(Y(BW==1));
     Y_max = max(Y(BW==1));
-    crop_top = max(1, Y_min-10);
+    crop_top = max(1, Y_min - 10);
     
     % Apply vertical crop
     I_crop_aligned = I_aligned(crop_top:Y_max, :);
     I_crop_orig    = I_orig(crop_top:Y_max, :);
     [sy, sx] = size(I_crop_aligned);
     
+    % Extract SAM embeddings from the flipped and aligned image
     embeddings_aligned = extractEmbeddings(MODEL, I_crop_aligned);
 end

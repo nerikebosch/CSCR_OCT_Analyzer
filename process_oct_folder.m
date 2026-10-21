@@ -14,9 +14,7 @@ function visitNum = process_oct_folder(folderPath, options)
 %   options.EyeSide       - 'OD' (Right) or 'OS' (Left) (default auto-detected)
 %   options.CentralThickness_OD - Central thickness for Right eye in um (optional)
 %   options.CentralThickness_OS - Central thickness for Left eye in um (optional)
-
     if nargin < 2, options = struct(); end
-
     if ~isfield(options, 'plotoption'), options.plotoption = 0; end
     if ~isfield(options, 'MODEL') || isempty(options.MODEL)
         disp('Initializing SAM segmentAnythingModel...');
@@ -24,19 +22,15 @@ function visitNum = process_oct_folder(folderPath, options)
     else
         MODEL = options.MODEL;
     end
-
     if ~isfolder(folderPath)
         error('Specified folder does not exist: %s', folderPath);
     end
-
     [~, folderName, ~] = fileparts(folderPath);
     fileList = dir(fullfile(folderPath, '*.bmp'));
     numFiles = length(fileList);
-
     if numFiles == 0
         error('No .bmp scan files found in: %s', folderPath);
     end
-
     % Determine target slices (default: slice 1, slice 2, and last slice)
     if isfield(options, 'targetIndices') && ~isempty(options.targetIndices)
         targetIndices = options.targetIndices;
@@ -45,16 +39,17 @@ function visitNum = process_oct_folder(folderPath, options)
     end
     % Ensure indices are within bounds
     targetIndices = targetIndices(targetIndices >= 1 & targetIndices <= numFiles);
-
     %% Metadata Extraction (Date, Eye Side, Visit Number)
     [extractedDate, extractedEye] = parse_folder_metadata(folderName);
-
     % Resolve Eye Side
     eyeSide = extractedEye;
     if isfield(options, 'EyeSide') && ~isempty(options.EyeSide)
         eyeSide = upper(string(options.EyeSide));
     end
-
+    
+    % Flag for Left Eye horizontal flipping
+    isLeftEye = (eyeSide == "OS");
+    
     % Resolve Visit Date
     visitDate = extractedDate;
     if isfield(options, 'VisitDate') && ~isempty(options.VisitDate)
@@ -64,7 +59,6 @@ function visitNum = process_oct_folder(folderPath, options)
             visitDate = datetime(options.VisitDate, 'InputFormat', 'yyyy-MM-dd');
         end
     end
-
     % Resolve Visit Number from Database
     Visits = db_manager('get_visits');
     if isfield(options, 'VisitNum') && ~isempty(options.VisitNum)
@@ -84,7 +78,6 @@ function visitNum = process_oct_folder(folderPath, options)
             fprintf('Assigned new Visit #%d for date %s.\n', visitNum, datestr(visitDate, 'yyyy-mm-dd'));
         end
     end
-
     % Prepare/Update Visit record in Database
     vData = struct();
     vData.VisitNum = visitNum;
@@ -93,35 +86,28 @@ function visitNum = process_oct_folder(folderPath, options)
     if isfield(options, 'CentralThickness_OS'), vData.CentralThickness_OS = options.CentralThickness_OS; end
     if isfield(options, 'Notes'), vData.Notes = options.Notes; end
     db_manager('save_visit', vData);
-
     fprintf('====================================================\n');
     fprintf('Processing OCT Folder: %s\n', folderName);
     fprintf('Visit: #%d | Date: %s | Eye: %s | Slices: %s\n', ...
         visitNum, datestr(visitDate, 'yyyy-mm-dd'), eyeSide, mat2str(targetIndices));
     fprintf('====================================================\n');
-
     %% Process Target Slices
     for i = 1:length(targetIndices)
         idx = targetIndices(i);
         fileName = fileList(idx).name;
         fprintf('  --> Processing Slice %d of %d (Index %d): %s\n', i, length(targetIndices), idx, fileName);
-
         try
-            % Preprocess & Align
+            % Preprocess & Align (Pass isLeftEye so image & SAM embeddings flip together)
             [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = ...
-                preprocess_OCT(folderPath, fileName, MODEL);
-
+                preprocess_OCT(folderPath, fileName, MODEL, isLeftEye);
             % Segment ILM
             [Layer_ILM, h1] = segment_ILM(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, options.plotoption);
-
             % Detect Macular Hole
             [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = ...
                 detect_hole(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, Layer_ILM, options.plotoption, h1);
-
             % Segment Remaining Layers
             [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top] = ...
                 segment_layers(I_crop_aligned, MODEL, sy, sx, MaxPH, indMaxPH, Layer_ILM, Mask_Hole, options.plotoption, h1);
-
             % Extract ROIs & Calculate Speckle Stats
             [STATS_Full, STATS_Right, STATS_Left] = ...
                 analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
@@ -133,19 +119,16 @@ function visitNum = process_oct_folder(folderPath, options)
                 analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
                              Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
-
             % If plotoption was off, close any lingering figures created by functions
             if ~options.plotoption
                 close all hidden;
             end
-
             % Assemble Scan Record
             scanRecord = struct();
             scanRecord.VisitNum = visitNum;
             scanRecord.ImageIndex = i; % 1, 2, 3
             scanRecord.EyeSide = eyeSide;
             scanRecord.FileName = fileName;
-
             % Right ROIs (with safety checks for empty/invalid structures)
             if ~isempty(STATS_Right) && isstruct(STATS_Right)
                 if isfield(STATS_Right, 'R1') && ~isempty(STATS_Right.R1), scanRecord.ROI_Right_L1 = STATS_Right.R1.CR; end
@@ -163,7 +146,6 @@ function visitNum = process_oct_folder(folderPath, options)
                 if isfield(STATS_Left, 'L4') && ~isempty(STATS_Left.L4), scanRecord.ROI_Left_L4 = STATS_Left.L4.CR; end
                 if isfield(STATS_Left, 'L5') && ~isempty(STATS_Left.L5), scanRecord.ROI_Left_L5 = STATS_Left.L5.CR; end
             end
-
             % Fixed Width Right ROIs
             if ~isempty(STATS_Right_fw) && isstruct(STATS_Right_fw)
                 if isfield(STATS_Right_fw, 'R1') && ~isempty(STATS_Right_fw.R1), scanRecord.ROI_Right_L1_fw = STATS_Right_fw.R1.CR; end
@@ -180,7 +162,6 @@ function visitNum = process_oct_folder(folderPath, options)
                 if isfield(STATS_Left_fw, 'L4') && ~isempty(STATS_Left_fw.L4), scanRecord.ROI_Left_L4_fw = STATS_Left_fw.L4.CR; end
                 if isfield(STATS_Left_fw, 'L5') && ~isempty(STATS_Left_fw.L5), scanRecord.ROI_Left_L5_fw = STATS_Left_fw.L5.CR; end
             end
-
             % Full Width ROIs
             if isstruct(STATS_Full)
                 if isfield(STATS_Full, 'Layer1') && ~isempty(STATS_Full.Layer1), scanRecord.ROI_Full_L1 = STATS_Full.Layer1.CR; end
@@ -189,16 +170,13 @@ function visitNum = process_oct_folder(folderPath, options)
                 if isfield(STATS_Full, 'Layer4') && ~isempty(STATS_Full.Layer4), scanRecord.ROI_Full_L4 = STATS_Full.Layer4.CR; end
                 if isfield(STATS_Full, 'Layer5') && ~isempty(STATS_Full.Layer5), scanRecord.ROI_Full_L5 = STATS_Full.Layer5.CR; end
             end
-
             % Save slice to database
             db_manager('save_scan', scanRecord);
             fprintf('      Successfully saved slice %d (CR values recorded).\n', i);
-
         catch ME
             warning('Failed processing file %s: %s', fileName, ME.message);
         end
     end
-
     %% Automatically Update All Longitudinal Statistics in DB
     fprintf('\nUpdating longitudinal statistics and rates of change across visits...\n');
     compute_statistics('update_all');
