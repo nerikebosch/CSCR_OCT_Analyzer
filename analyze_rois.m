@@ -1,11 +1,9 @@
-function [STATS_Full, STATS_Right, STATS_Left] = ...
-        analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
+function [STATS_Full, STATS_Right, STATS_Left] = analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom)
     STATS_Full = [];
     STATS_Right = [];
     STATS_Left = [];    
-
-    %% 5 Left-Side ROIs
     
+    %% 5 Left-Side ROIs
     if is_hole_found
         % Find where the hole starts on the left side
         hole_columns = any(Mask_Hole, 1);
@@ -18,7 +16,6 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
             hole_left_edge = round(sx / 2) - 10;
             hole_right_edge = round(sx / 2) + 10;
         end
-
         % Margins to protect the data
         safe_margin = 50; % Horizontal margin to stay clear of the hole
         vert_margin = 2; % Vertical margin to exclude the bright boundary lines
@@ -26,8 +23,6 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         % Left ROI boundaries with bounds enforcement
         x_left_start = 1; 
         x_left_end   = max(1, hole_left_edge - safe_margin);
-
-        
         
         % Initialize 5 separate masks for the left side
         Mask_ROI_L1 = false(sy, sx);
@@ -84,22 +79,19 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         h_overlay = imagesc(yellow_overlay);
         set(h_overlay, 'AlphaData', Mask_All_Left * 0.35);
         
-        %% Statistics
-        
+        %% Statistics - Left Side
         masks_left = {Mask_ROI_L1, Mask_ROI_L2, Mask_ROI_L3, Mask_ROI_L4, Mask_ROI_L5};
         roi_fields = {'L1', 'L2', 'L3', 'L4', 'L5'};
                  
         STATS_Left = struct();
                  
         for i = 1:5
-            Tilted_Mask = imrotate(masks_left{i}, -angle_deg, 'nearest', 'crop');
-            ROI_raw = double(I_crop_orig(Tilted_Mask)); 
+            Final_Mask = transform_mask_to_raw(masks_left{i}, angle_deg, geom);
+            ROI_raw = double(I_true_raw(Final_Mask)); 
             
             if ~isempty(ROI_raw)
                 ROI_transformed = (10.^(ROI_raw/255) - 1) / 9; 
-                current_stats = speckle_stats(ROI_transformed, ROI_raw);
-                STATS_Left.(roi_fields{i}) = current_stats;
-                
+                STATS_Left.(roi_fields{i}) = speckle_stats(ROI_transformed, ROI_raw);
             else
                 STATS_Left.(roi_fields{i}) = []; % Assign empty if no pixels
             end
@@ -112,11 +104,7 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         if ~isempty(STATS_Left.L4), disp(STATS_Left.L4.CR); end
         if ~isempty(STATS_Left.L5), disp(STATS_Left.L5.CR); end
      
-    
     %% 5 Right-Side ROIs
-        % Find where the hole ends on the right side
-        % (hole_columns is already defined in the left-side code)
-        
         % Right ROI boundaries with bounds enforcement
         x_right_start = min(sx, hole_right_edge + safe_margin);
         x_right_end   = sx;
@@ -180,13 +168,12 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         STATS_Right = struct();
                  
         for i = 1:5
-            Tilted_Mask = imrotate(masks_right{i}, -angle_deg, 'nearest', 'crop');
-            ROI_raw_R = double(I_crop_orig(Tilted_Mask)); 
+            Final_Mask_R = transform_mask_to_raw(masks_right{i}, angle_deg, geom);
+            ROI_raw_R = double(I_true_raw(Final_Mask_R)); 
             
             if ~isempty(ROI_raw_R)
                 ROI_transformed_R = (10.^(ROI_raw_R/255) - 1) / 9; 
-                current_stats_R = speckle_stats(ROI_transformed_R, ROI_raw_R);
-                STATS_Right.(roi_fields_right{i}) = current_stats_R;
+                STATS_Right.(roi_fields_right{i}) = speckle_stats(ROI_transformed_R, ROI_raw_R);
             else
                 STATS_Right.(roi_fields_right{i}) = []; % Assign empty if no pixels are valid
             end
@@ -272,13 +259,12 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         STATS_Full = struct();
                  
         for i = 1:5
-            Tilted_Mask = imrotate(masks_full{i}, -angle_deg, 'nearest', 'crop');
-            ROI_raw_F = double(I_crop_orig(Tilted_Mask)); 
+            Final_Mask_F = transform_mask_to_raw(masks_full{i}, angle_deg, geom);
+            ROI_raw_F = double(I_true_raw(Final_Mask_F)); 
             
             if ~isempty(ROI_raw_F)
                 ROI_transformed_F = (10.^(ROI_raw_F/255) - 1) / 9; 
-                current_stats_F = speckle_stats(ROI_transformed_F, ROI_raw_F);
-                STATS_Full.(roi_fields_full{i}) = current_stats_F;
+                STATS_Full.(roi_fields_full{i}) = speckle_stats(ROI_transformed_F, ROI_raw_F);
             else
                 STATS_Full.(roi_fields_full{i}) = []; % Assign empty if no pixels are valid
             end
@@ -292,3 +278,22 @@ function [STATS_Full, STATS_Right, STATS_Left] = ...
         if ~isempty(STATS_Full.Layer4), disp(STATS_Full.Layer4.CR); end
         if ~isempty(STATS_Full.Layer5), disp(STATS_Full.Layer5.CR); end
     end
+end
+
+%% HELPER FUNCTION: Maps the AI mask back to the unstretched raw dimensions
+function True_Mask = transform_mask_to_raw(Mask, angle_deg, geom)
+    % 1. Rotate back to unaligned state
+    M_rot = imrotate(Mask, -angle_deg, 'nearest', 'crop');
+    
+    % 2. Undo vertical crop (pad top and bottom)
+    pad_top = geom.crop_top - 1;
+    pad_bottom = geom.target_sy - geom.Y_max;
+    M_unpad_v = padarray(M_rot, [pad_top, 0], 0, 'pre');
+    M_unpad_v = padarray(M_unpad_v, [pad_bottom, 0], 0, 'post');
+    
+    % 3. Undo horizontal crop (pad left and right)
+    M_unpad_full = padarray(M_unpad_v, [0, geom.Margin], 0, 'both');
+    
+    % 4. Shrink/Expand back to true original dimensions using 'nearest' so it stays a 0/1 mask
+    True_Mask = imresize(M_unpad_full, [geom.orig_sy, geom.orig_sx], 'nearest');
+end

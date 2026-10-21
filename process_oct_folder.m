@@ -97,8 +97,8 @@ function visitNum = process_oct_folder(folderPath, options)
         fileName = fileList(idx).name;
         fprintf('  --> Processing Slice %d of %d (Index %d): %s\n', i, length(targetIndices), idx, fileName);
         try
-            % Preprocess & Align (Pass isLeftEye so image & SAM embeddings flip together)
-            [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg] = ...
+            % Preprocess & Align 
+            [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg, I_true_raw, geom] = ...
                 preprocess_OCT(folderPath, fileName, MODEL, isLeftEye);
             % Segment ILM
             [Layer_ILM, h1] = segment_ILM(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, options.plotoption);
@@ -108,17 +108,18 @@ function visitNum = process_oct_folder(folderPath, options)
             % Segment Remaining Layers
             [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top] = ...
                 segment_layers(I_crop_aligned, MODEL, sy, sx, MaxPH, indMaxPH, Layer_ILM, Mask_Hole, options.plotoption, h1);
-            % Extract ROIs & Calculate Speckle Stats
+            % Extract ROIs & Calculate Speckle Stats ON RAW PIXELS
             [STATS_Full, STATS_Right, STATS_Left] = ...
                 analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
-                             Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
+                             Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom);
                              
-            % Extract ROIs & Calculate Speckle Stats (New Fixed 120px Width)
+            % Extract ROIs & Calculate Speckle Stats (New Fixed 120px Width) ON RAW PIXELS
             [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw] = ...
                 analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
-                             Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1);
+                             Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom);
+            
             % If plotoption was off, close any lingering figures created by functions
             if ~options.plotoption
                 close all hidden;
