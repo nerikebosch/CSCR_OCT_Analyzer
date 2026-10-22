@@ -29,7 +29,7 @@ STATS.EXP = expfit(ROI);
 STATS.GAM = gamfit(ROI);
 % Generalized Gamma
 % using 3rd part package wafo-2.1.0
-STATS.GGAM = wggamfit(ROI,0);
+% STATS.GGAM = wggamfit(ROI,0);
 % K - distribution    
 STATS.K = kfit(ROI);
 % Log-normal
@@ -46,7 +46,7 @@ STATS.WBL = wblfit(ROI);
 PDF_BURR = burr2pdf(pts,STATS.BURR);
 PDF_EXP = exppdf(pts,STATS.EXP);
 PDF_GAM = gampdf(pts,STATS.GAM(1),STATS.GAM(2));
-PDF_GGAM = wggampdf(pts,STATS.GGAM(1),STATS.GGAM(2),STATS.GGAM(3));
+%PDF_GGAM = wggampdf(pts,STATS.GGAM(1),STATS.GGAM(2),STATS.GGAM(3));
 PDF_K = kpdf(pts,STATS.K(1),STATS.K(2));
 PDF_LN = lognpdf(pts,STATS.LN(1),STATS.LN(2));
 PD = makedist('Nakagami',FD.mu,FD.omega);
@@ -58,14 +58,14 @@ PDF_WBL = wblpdf(pts,STATS.WBL(1),STATS.WBL(2));
 GoF_BURR = sqrt(mean((PDF_BURR-KDE).^2));
 GoF_EXP = sqrt(mean((PDF_EXP-KDE).^2));
 GoF_GAM = sqrt(mean((PDF_GAM-KDE).^2));
-GoF_GGAM = sqrt(mean((PDF_GGAM-KDE).^2));
+%GoF_GGAM = sqrt(mean((PDF_GGAM-KDE).^2));
 GoF_K = sqrt(mean((PDF_K-KDE).^2));
 GoF_LN = sqrt(mean((PDF_LN-KDE).^2));
 GoF_NK = sqrt(mean((PDF_NK-KDE).^2));
 GoF_RAY = sqrt(mean((PDF_RAY-KDE).^2));
 GoF_WBL = sqrt(mean((PDF_WBL-KDE).^2));
 
-STATS.GOF = [GoF_BURR GoF_EXP GoF_GAM GoF_GGAM GoF_K GoF_LN GoF_NK GoF_RAY GoF_WBL];
+STATS.GOF = [GoF_BURR GoF_EXP GoF_GAM GoF_K GoF_LN GoF_NK GoF_RAY GoF_WBL];
 
 % contrast ratio
 STATS.CR = std(ROI)/mean(ROI);

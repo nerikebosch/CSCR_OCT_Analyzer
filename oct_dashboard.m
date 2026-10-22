@@ -150,6 +150,26 @@ function oct_dashboard()
     gridTable.Padding = [8, 8, 8, 8];
     tblAllVisits = uitable(gridTable, 'FontSize', 10);
     tblAllVisits.CellSelectionCallback = @(~, e) on_table_cell_selected(e);
+
+    % Tab 4: Texture Distribution Curves (PDF Viewer)
+    tabDist = uitab(tabGroup, 'Title', 'Texture Distributions (PDFs)');
+    gridDist = uigridlayout(tabDist, [2, 1]);
+    gridDist.RowHeight = {40, '1x'};
+    gridDist.Padding = [10, 10, 10, 10];
+    
+    distControlPanel = uipanel(gridDist, 'BorderType', 'none');
+    distControlGrid = uigridlayout(distControlPanel, [1, 3]);
+    distControlGrid.ColumnWidth = {250, 250, '1x'};
+    distControlGrid.Padding = [0,0,0,0];
+    
+    uilabel(distControlGrid, 'Text', 'Select Layer to Visualize:', 'FontWeight', 'bold');
+    ddDistLayer = uidropdown(distControlGrid, ...
+        'Items', {'Left L1', 'Left L2', 'Left L3', 'Left L4', 'Left L5', 'Right L1', 'Right L2', 'Right L3', 'Right L4', 'Right L5'}, ...
+        'ItemsData', {'Left_L1', 'Left_L2', 'Left_L3', 'Left_L4', 'Left_L5', 'Right_L1', 'Right_L2', 'Right_L3', 'Right_L4', 'Right_L5'}, ...
+        'ValueChangedFcn', @(~,~) render_distribution_plot());
+        
+    axDist = uiaxes(gridDist);
+    axDist.FontSize = 11;
     %% Initialize & Load Data
     SummaryData = [];
     VisitsData  = [];
@@ -198,32 +218,45 @@ function oct_dashboard()
             sfx = '_fw';
         end
         
-        % 1. Remember what the user was currently looking at
         curr_val = char(ddCorrMetric.Value);
         
-        dispNames = {'Left ROI: Median L1', 'Left ROI: Median L2', 'Left ROI: Median L3', 'Left ROI: Median L4', 'Left ROI: Median L5', ...
-                     'Left ROI: Ratio L1/L2', 'Left ROI: Ratio L2/L3', 'Left ROI: Ratio L3/L4', 'Left ROI: Ratio L4/L5', 'Left ROI: Ratio L1/L5', ...
-                     'Right ROI: Median L1', 'Right ROI: Median L2', 'Right ROI: Median L3', 'Right ROI: Median L4', 'Right ROI: Median L5', ...
-                     'Right ROI: Ratio L1/L2', 'Right ROI: Ratio L2/L3', 'Right ROI: Ratio L3/L4', 'Right ROI: Ratio L4/L5', 'Right ROI: Ratio L1/L5'};
-                     
-        dbVars = { ...
-            sprintf('Median_%s_Left_L1%s', eye, sfx), sprintf('Median_%s_Left_L2%s', eye, sfx), sprintf('Median_%s_Left_L3%s', eye, sfx), sprintf('Median_%s_Left_L4%s', eye, sfx), sprintf('Median_%s_Left_L5%s', eye, sfx), ...
-            sprintf('Median_%s_Left_Ratio_L1_L2%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L2_L3%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L3_L4%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx), sprintf('Median_%s_Left_Ratio_L1_L5%s', eye, sfx), ...
-            sprintf('Median_%s_Right_L1%s', eye, sfx), sprintf('Median_%s_Right_L2%s', eye, sfx), sprintf('Median_%s_Right_L3%s', eye, sfx), sprintf('Median_%s_Right_L4%s', eye, sfx), sprintf('Median_%s_Right_L5%s', eye, sfx), ...
-            sprintf('Median_%s_Right_Ratio_L1_L2%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L2_L3%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L3_L4%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L4_L5%s', eye, sfx), sprintf('Median_%s_Right_Ratio_L1_L5%s', eye, sfx) ...
-        };
+        % DYNAMICALLY BUILD THE DROPDOWN TO INCLUDE TEXTURES
+        dispNames = {};
+        dbVars = {};
+        
+        for side = ["Left", "Right"]
+            % 1. Standard CR Ratios
+            dispNames{end+1} = sprintf('%s ROI: CR Ratio L3/L4', side); dbVars{end+1} = sprintf('Median_%s_%s_Ratio_L3_L4%s', eye, side, sfx);
+            dispNames{end+1} = sprintf('%s ROI: CR Ratio L4/L5', side); dbVars{end+1} = sprintf('Median_%s_%s_Ratio_L4_L5%s', eye, side, sfx);
+            
+            % 2. Loop through all 5 layers to add CR, Densito, Gamma, Nakagami
+            for L = 1:5
+                % Speckle Contrast (CR)
+                dispNames{end+1} = sprintf('%s ROI: Contrast (CR) L%d', side, L);
+                dbVars{end+1} = sprintf('Median_%s_%s_L%d%s', eye, side, L, sfx);
+                
+                % Densitometry (Mean Intensity)
+                dispNames{end+1} = sprintf('%s ROI: Densitometry L%d', side, L);
+                dbVars{end+1} = sprintf('Median_%s_%s_L%d_Densito%s', eye, side, L, sfx);
+                
+                % Gamma Shape Parameter
+                dispNames{end+1} = sprintf('%s ROI: Gamma Shape L%d', side, L);
+                dbVars{end+1} = sprintf('Median_%s_%s_L%d_GAM%s', eye, side, L, sfx);
+                
+                % Nakagami Mu
+                dispNames{end+1} = sprintf('%s ROI: Nakagami \\mu L%d', side, L);
+                dbVars{end+1} = sprintf('Median_%s_%s_L%d_NK%s', eye, side, L, sfx);
+            end
+        end
         
         ddCorrMetric.Items = dispNames;
         ddCorrMetric.ItemsData = dbVars;
         
-        % 2. Intelligently reconstruct their selection for the new mode/eye
+        % Reconstruct their selection for the new mode/eye
         if isempty(curr_val)
             ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx); 
         else
-            % Strip old eye and mode tags to get the "core" metric name
             core_metric = strrep(strrep(strrep(curr_val, 'OD_', ''), 'OS_', ''), '_fw', '');
-            
-            % Reattach the newly selected eye and mode tags
             new_target = strrep(core_metric, 'Median_', sprintf('Median_%s_', eye));
             new_target = [new_target, sfx];
             
@@ -233,8 +266,82 @@ function oct_dashboard()
                 ddCorrMetric.Value = sprintf('Median_%s_Left_Ratio_L4_L5%s', eye, sfx); 
             end
         end
-        
         on_metric_changed();
+    end
+
+function render_distribution_plot()
+        if isempty(ScansData), return; end
+        cla(axDist);
+        
+        % Get the target data from the UI selections
+        eye = char(ddEyeSelect.Value);
+        mode = char(ddRoiMode.Value);
+        sfx = ''; if strcmp(mode, 'fw'), sfx = '_fw'; end
+        layer_selection = char(ddDistLayer.Value); % e.g., 'Left_L4'
+        
+        % Get the current visit number
+        tok = regexp(ddVisit.Value, 'Visit (\d+)', 'tokens');
+        if isempty(tok), return; end
+        currVisitNum = str2double(tok{1}{1});
+        
+        % Find the row in the Scans Database
+        % We take the FIRST slice (ImageIndex = 1) for the distribution visualization
+        scanRow = ScansData(ScansData.VisitNum == currVisitNum & ScansData.EyeSide == eye & ScansData.ImageIndex == 1, :);
+        if isempty(scanRow)
+            title(axDist, 'No scan data available for this visit/eye combination.', 'FontWeight', 'normal');
+            return;
+        end
+        
+        % Extract the parameters for the selected layer
+        base_col = sprintf('ROI_%s', layer_selection); % e.g. 'ROI_Left_L4'
+        try
+            gam_a = scanRow.(sprintf('%s_GAM_A%s', base_col, sfx))(1);
+            gam_b = scanRow.(sprintf('%s_GAM_B%s', base_col, sfx))(1);
+            nk_mu = scanRow.(sprintf('%s_NK_mu%s', base_col, sfx))(1);
+            nk_om = scanRow.(sprintf('%s_NK_om%s', base_col, sfx))(1);
+            exp_mu = scanRow.(sprintf('%s_EXP%s', base_col, sfx))(1);
+            ray_b = scanRow.(sprintf('%s_RAY%s', base_col, sfx))(1);
+            wbl_a = scanRow.(sprintf('%s_WBL_A%s', base_col, sfx))(1);
+            wbl_b = scanRow.(sprintf('%s_WBL_B%s', base_col, sfx))(1);
+        catch
+            title(axDist, 'Missing parameter data. Please re-run batch processing.', 'Color', 'red');
+            return;
+        end
+        
+        if isnan(gam_a)
+            title(axDist, 'Layer data is NaN (tissue not found in this scan).');
+            return;
+        end
+        
+        % Generate the X-axis mathematically based on the Gamma mean
+        dist_mean = gam_a * gam_b;
+        dist_std = sqrt(gam_a * (gam_b^2));
+        x_max = dist_mean + (4 * dist_std);
+        x = linspace(0.001, x_max, 1000);
+        
+        % Calculate all the PDF curves
+        pdf_gam = gampdf(x, gam_a, gam_b);
+        pdf_exp = exppdf(x, exp_mu);
+        pdf_ray = raylpdf(x, ray_b);
+        pdf_wbl = wblpdf(x, wbl_a, wbl_b);
+        pd_nk = makedist('Nakagami', nk_mu, nk_om);
+        pdf_nk = pdf(pd_nk, x);
+        
+        % Plot them all on one graph
+        hold(axDist, 'on');
+        plot(axDist, x, pdf_gam, 'LineWidth', 2.5, 'Color', [0.8 0.2 0.2], 'DisplayName', 'Gamma Distribution');
+        plot(axDist, x, pdf_nk, 'LineWidth', 2, 'Color', [0.2 0.6 0.2], 'LineStyle', '--', 'DisplayName', 'Nakagami Distribution');
+        plot(axDist, x, pdf_ray, 'LineWidth', 1.5, 'Color', [0.2 0.2 0.8], 'DisplayName', 'Rayleigh Distribution');
+        plot(axDist, x, pdf_wbl, 'LineWidth', 1.5, 'Color', [0.8 0.5 0.1], 'DisplayName', 'Weibull Distribution');
+        plot(axDist, x, pdf_exp, 'LineWidth', 1, 'Color', [0.4 0.4 0.4], 'LineStyle', ':', 'DisplayName', 'Exponential (Reference)');
+        hold(axDist, 'off');
+        
+        % 7. Format the graph beautifully
+        title(axDist, sprintf('Texture Distributions for %s | Visit %d (%s)', strrep(layer_selection, '_', ' '), currVisitNum, eye), 'FontWeight', 'bold', 'FontSize', 14);
+        xlabel(axDist, 'Transformed Pixel Intensity', 'FontWeight', 'bold');
+        ylabel(axDist, 'Probability Density', 'FontWeight', 'bold');
+        grid(axDist, 'on'); box(axDist, 'on');
+        legend(axDist, 'Location', 'northeast', 'FontSize', 11);
     end
 
     function on_visit_selected()
@@ -257,6 +364,7 @@ function oct_dashboard()
         efThicknessOS.Value = thOS;
         
         taNotes.Value = {char(vRow.Notes)};
+        render_distribution_plot();
     end
 
     function on_save_visit()

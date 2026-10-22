@@ -1,19 +1,4 @@
 function visitNum = process_oct_folder(folderPath, options)
-% PROCESS_OCT_FOLDER Analyzes OCT scans in a folder and saves results to the local database.
-%
-% USAGE:
-%   visitNum = process_oct_folder(folderPath)
-%   visitNum = process_oct_folder(folderPath, options)
-%
-% OPTIONS:
-%   options.MODEL         - Instantiated segmentAnythingModel (optional, creates if empty)
-%   options.plotoption    - 1 to display figures, 0 for headless (default: 0)
-%   options.targetIndices - Slices to analyze (default: [1, 2, numFiles])
-%   options.VisitNum      - Explicit visit number (optional, auto-detected if empty)
-%   options.VisitDate     - Explicit visit date (optional, auto-detected from folder name)
-%   options.EyeSide       - 'OD' (Right) or 'OS' (Left) (default auto-detected)
-%   options.CentralThickness_OD - Central thickness for Right eye in um (optional)
-%   options.CentralThickness_OS - Central thickness for Left eye in um (optional)
     if nargin < 2, options = struct(); end
     if ~isfield(options, 'plotoption'), options.plotoption = 0; end
     if ~isfield(options, 'MODEL') || isempty(options.MODEL)
@@ -31,26 +16,22 @@ function visitNum = process_oct_folder(folderPath, options)
     if numFiles == 0
         error('No .bmp scan files found in: %s', folderPath);
     end
-    % Determine target slices (default: slice 1, slice 2, and last slice)
+    
     if isfield(options, 'targetIndices') && ~isempty(options.targetIndices)
         targetIndices = options.targetIndices;
     else
         targetIndices = [1, 2, numFiles];
     end
-    % Ensure indices are within bounds
     targetIndices = targetIndices(targetIndices >= 1 & targetIndices <= numFiles);
-    %% Metadata Extraction (Date, Eye Side, Visit Number)
+    
     [extractedDate, extractedEye] = parse_folder_metadata(folderName);
-    % Resolve Eye Side
     eyeSide = extractedEye;
     if isfield(options, 'EyeSide') && ~isempty(options.EyeSide)
         eyeSide = upper(string(options.EyeSide));
     end
     
-    % Flag for Left Eye horizontal flipping
     isLeftEye = (eyeSide == "OS");
     
-    % Resolve Visit Date
     visitDate = extractedDate;
     if isfield(options, 'VisitDate') && ~isempty(options.VisitDate)
         if isa(options.VisitDate, 'datetime')
@@ -59,26 +40,21 @@ function visitNum = process_oct_folder(folderPath, options)
             visitDate = datetime(options.VisitDate, 'InputFormat', 'yyyy-MM-dd');
         end
     end
-    % Resolve Visit Number from Database
+    
     Visits = db_manager('get_visits');
     if isfield(options, 'VisitNum') && ~isempty(options.VisitNum)
         visitNum = int32(options.VisitNum);
     else
-        % Check if a visit already exists on this date
         matchedIdx = find(Visits.VisitDate == visitDate, 1);
         if ~isempty(matchedIdx)
             visitNum = Visits.VisitNum(matchedIdx);
             fprintf('Matched existing Visit #%d for date %s.\n', visitNum, datestr(visitDate, 'yyyy-mm-dd'));
         else
-            if isempty(Visits)
-                visitNum = int32(1);
-            else
-                visitNum = int32(max(Visits.VisitNum) + 1);
-            end
+            if isempty(Visits), visitNum = int32(1); else, visitNum = int32(max(Visits.VisitNum) + 1); end
             fprintf('Assigned new Visit #%d for date %s.\n', visitNum, datestr(visitDate, 'yyyy-mm-dd'));
         end
     end
-    % Prepare/Update Visit record in Database
+    
     vData = struct();
     vData.VisitNum = visitNum;
     vData.VisitDate = visitDate;
@@ -86,127 +62,101 @@ function visitNum = process_oct_folder(folderPath, options)
     if isfield(options, 'CentralThickness_OS'), vData.CentralThickness_OS = options.CentralThickness_OS; end
     if isfield(options, 'Notes'), vData.Notes = options.Notes; end
     db_manager('save_visit', vData);
+    
     fprintf('====================================================\n');
     fprintf('Processing OCT Folder: %s\n', folderName);
-    fprintf('Visit: #%d | Date: %s | Eye: %s | Slices: %s\n', ...
-        visitNum, datestr(visitDate, 'yyyy-mm-dd'), eyeSide, mat2str(targetIndices));
+    fprintf('Visit: #%d | Date: %s | Eye: %s | Slices: %s\n', visitNum, datestr(visitDate, 'yyyy-mm-dd'), eyeSide, mat2str(targetIndices));
     fprintf('====================================================\n');
-    %% Process Target Slices
+    
     for i = 1:length(targetIndices)
         idx = targetIndices(i);
         fileName = fileList(idx).name;
         fprintf('  --> Processing Slice %d of %d (Index %d): %s\n', i, length(targetIndices), idx, fileName);
         try
-            % Preprocess & Align 
             [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg, I_true_raw, geom] = ...
                 preprocess_OCT(folderPath, fileName, MODEL, isLeftEye);
-            % Segment ILM
             [Layer_ILM, h1] = segment_ILM(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, options.plotoption);
-            % Detect Macular Hole
             [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = ...
                 detect_hole(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, Layer_ILM, options.plotoption, h1);
-            % Segment Remaining Layers
             [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top] = ...
                 segment_layers(I_crop_aligned, MODEL, sy, sx, MaxPH, indMaxPH, Layer_ILM, Mask_Hole, options.plotoption, h1);
-            % Extract ROIs & Calculate Speckle Stats ON RAW PIXELS
+            
             [STATS_Full, STATS_Right, STATS_Left] = ...
                 analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
                              Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom);
                              
-            % Extract ROIs & Calculate Speckle Stats (New Fixed 120px Width) ON RAW PIXELS
             [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw] = ...
                 analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, ...
                              sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, ...
                              Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom);
             
-            % If plotoption was off, close any lingering figures created by functions
-            if ~options.plotoption
-                close all hidden;
-            end
-            % Assemble Scan Record
+            if ~options.plotoption, close all hidden; end
+            
+            % Assemble Scan Record dynamically
             scanRecord = struct();
             scanRecord.VisitNum = visitNum;
-            scanRecord.ImageIndex = i; % 1, 2, 3
+            scanRecord.ImageIndex = i; 
             scanRecord.EyeSide = eyeSide;
             scanRecord.FileName = fileName;
-            % Right ROIs (with safety checks for empty/invalid structures)
-            if ~isempty(STATS_Right) && isstruct(STATS_Right)
-                if isfield(STATS_Right, 'R1') && ~isempty(STATS_Right.R1), scanRecord.ROI_Right_L1 = STATS_Right.R1.CR; end
-                if isfield(STATS_Right, 'R2') && ~isempty(STATS_Right.R2), scanRecord.ROI_Right_L2 = STATS_Right.R2.CR; end
-                if isfield(STATS_Right, 'R3') && ~isempty(STATS_Right.R3), scanRecord.ROI_Right_L3 = STATS_Right.R3.CR; end
-                if isfield(STATS_Right, 'R4') && ~isempty(STATS_Right.R4), scanRecord.ROI_Right_L4 = STATS_Right.R4.CR; end
-                if isfield(STATS_Right, 'R5') && ~isempty(STATS_Right.R5), scanRecord.ROI_Right_L5 = STATS_Right.R5.CR; end
-            end
             
-            % Left ROIs (with safety checks for empty/invalid structures)
-            if ~isempty(STATS_Left) && isstruct(STATS_Left)
-                if isfield(STATS_Left, 'L1') && ~isempty(STATS_Left.L1), scanRecord.ROI_Left_L1 = STATS_Left.L1.CR; end
-                if isfield(STATS_Left, 'L2') && ~isempty(STATS_Left.L2), scanRecord.ROI_Left_L2 = STATS_Left.L2.CR; end
-                if isfield(STATS_Left, 'L3') && ~isempty(STATS_Left.L3), scanRecord.ROI_Left_L3 = STATS_Left.L3.CR; end
-                if isfield(STATS_Left, 'L4') && ~isempty(STATS_Left.L4), scanRecord.ROI_Left_L4 = STATS_Left.L4.CR; end
-                if isfield(STATS_Left, 'L5') && ~isempty(STATS_Left.L5), scanRecord.ROI_Left_L5 = STATS_Left.L5.CR; end
-            end
-            % Fixed Width Right ROIs
-            if ~isempty(STATS_Right_fw) && isstruct(STATS_Right_fw)
-                if isfield(STATS_Right_fw, 'R1') && ~isempty(STATS_Right_fw.R1), scanRecord.ROI_Right_L1_fw = STATS_Right_fw.R1.CR; end
-                if isfield(STATS_Right_fw, 'R2') && ~isempty(STATS_Right_fw.R2), scanRecord.ROI_Right_L2_fw = STATS_Right_fw.R2.CR; end
-                if isfield(STATS_Right_fw, 'R3') && ~isempty(STATS_Right_fw.R3), scanRecord.ROI_Right_L3_fw = STATS_Right_fw.R3.CR; end
-                if isfield(STATS_Right_fw, 'R4') && ~isempty(STATS_Right_fw.R4), scanRecord.ROI_Right_L4_fw = STATS_Right_fw.R4.CR; end
-                if isfield(STATS_Right_fw, 'R5') && ~isempty(STATS_Right_fw.R5), scanRecord.ROI_Right_L5_fw = STATS_Right_fw.R5.CR; end
-            end
-            % Fixed Width Left ROIs
-            if ~isempty(STATS_Left_fw) && isstruct(STATS_Left_fw)
-                if isfield(STATS_Left_fw, 'L1') && ~isempty(STATS_Left_fw.L1), scanRecord.ROI_Left_L1_fw = STATS_Left_fw.L1.CR; end
-                if isfield(STATS_Left_fw, 'L2') && ~isempty(STATS_Left_fw.L2), scanRecord.ROI_Left_L2_fw = STATS_Left_fw.L2.CR; end
-                if isfield(STATS_Left_fw, 'L3') && ~isempty(STATS_Left_fw.L3), scanRecord.ROI_Left_L3_fw = STATS_Left_fw.L3.CR; end
-                if isfield(STATS_Left_fw, 'L4') && ~isempty(STATS_Left_fw.L4), scanRecord.ROI_Left_L4_fw = STATS_Left_fw.L4.CR; end
-                if isfield(STATS_Left_fw, 'L5') && ~isempty(STATS_Left_fw.L5), scanRecord.ROI_Left_L5_fw = STATS_Left_fw.L5.CR; end
-            end
-            % Full Width ROIs
-            if isstruct(STATS_Full)
-                if isfield(STATS_Full, 'Layer1') && ~isempty(STATS_Full.Layer1), scanRecord.ROI_Full_L1 = STATS_Full.Layer1.CR; end
-                if isfield(STATS_Full, 'Layer2') && ~isempty(STATS_Full.Layer2), scanRecord.ROI_Full_L2 = STATS_Full.Layer2.CR; end
-                if isfield(STATS_Full, 'Layer3') && ~isempty(STATS_Full.Layer3), scanRecord.ROI_Full_L3 = STATS_Full.Layer3.CR; end
-                if isfield(STATS_Full, 'Layer4') && ~isempty(STATS_Full.Layer4), scanRecord.ROI_Full_L4 = STATS_Full.Layer4.CR; end
-                if isfield(STATS_Full, 'Layer5') && ~isempty(STATS_Full.Layer5), scanRecord.ROI_Full_L5 = STATS_Full.Layer5.CR; end
-            end
-            % Save slice to database
+            % DYNAMICALLY EXTRACT ALL TEXTURE METRICS (CR, Densito, GAM, NK)
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Right, 'Right', '');
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Left, 'Left', '');
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Full, 'Full', '');
+            
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Right_fw, 'Right', '_fw');
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Left_fw, 'Left', '_fw');
+            scanRecord = extract_texture_metrics(scanRecord, STATS_Full_fw, 'Full', '_fw');
+            
             db_manager('save_scan', scanRecord);
-            fprintf('      Successfully saved slice %d (CR values recorded).\n', i);
+            fprintf('      Successfully saved slice %d (Texture values recorded).\n', i);
         catch ME
             warning('Failed processing file %s: %s', fileName, ME.message);
         end
     end
-    %% Automatically Update All Longitudinal Statistics in DB
     fprintf('\nUpdating longitudinal statistics and rates of change across visits...\n');
     compute_statistics('update_all');
     fprintf('Folder processing complete! Database updated for Visit #%d.\n\n', visitNum);
 end
 
+%% Helper to dynamically map CR, Densito, GAM, and NK into the DB fields
+%% Helper to dynamically map ALL PDF parameters into the DB fields
+function record = extract_texture_metrics(record, stats_struct, sideName, suffix)
+    if isempty(stats_struct) || ~isstruct(stats_struct), return; end
+    if strcmp(sideName, 'Full'), structPrefix = 'Layer'; else, structPrefix = sideName(1); end
+    
+    for i = 1:5
+        fName = sprintf('%s%d', structPrefix, i); 
+        if isfield(stats_struct, fName) && ~isempty(stats_struct.(fName))
+            st = stats_struct.(fName);
+            % Original Stats
+            record.(sprintf('ROI_%s_L%d%s', sideName, i, suffix)) = st.CR;
+            record.(sprintf('ROI_%s_L%d_Densito%s', sideName, i, suffix)) = st.Densito;
+            
+            % PDF Parameters (All needed for plotting the curves)
+            record.(sprintf('ROI_%s_L%d_GAM_A%s', sideName, i, suffix)) = st.GAM(1);
+            record.(sprintf('ROI_%s_L%d_GAM_B%s', sideName, i, suffix)) = st.GAM(2);
+            record.(sprintf('ROI_%s_L%d_NK_mu%s', sideName, i, suffix)) = st.NK(1);
+            record.(sprintf('ROI_%s_L%d_NK_om%s', sideName, i, suffix)) = st.NK(2);
+            record.(sprintf('ROI_%s_L%d_EXP%s', sideName, i, suffix)) = st.EXP(1);
+            record.(sprintf('ROI_%s_L%d_RAY%s', sideName, i, suffix)) = st.RAY(1);
+            record.(sprintf('ROI_%s_L%d_WBL_A%s', sideName, i, suffix)) = st.WBL(1);
+            record.(sprintf('ROI_%s_L%d_WBL_B%s', sideName, i, suffix)) = st.WBL(2);
+        end
+    end
+end
+
 %% Parse Date and Eye Side from Folder Name
 function [vDate, eyeSide] = parse_folder_metadata(folderName)
-    % Default fallbacks
-    vDate = datetime('today');
-    eyeSide = "OD";
-    
-    % Check Eye side
-    if contains(folderName, '_Retina_Radial_L_', 'IgnoreCase', true) || ...
-       contains(folderName, '_L_', 'IgnoreCase', true)
+    vDate = datetime('today'); eyeSide = "OD";
+    if contains(folderName, '_Retina_Radial_L_', 'IgnoreCase', true) || contains(folderName, '_L_', 'IgnoreCase', true)
         eyeSide = "OS";
-    elseif contains(folderName, '_Retina_Radial_R_', 'IgnoreCase', true) || ...
-           contains(folderName, '_R_', 'IgnoreCase', true)
+    elseif contains(folderName, '_Retina_Radial_R_', 'IgnoreCase', true) || contains(folderName, '_R_', 'IgnoreCase', true)
         eyeSide = "OD";
     end
-    
-    % Extract all 8-consecutive digit dates starting with 20
     dateTokens = regexp(folderName, '(20\d{6})', 'match');
     if ~isempty(dateTokens)
-        try
-            % Use the LAST token to avoid matching the automated export prefix timestamp
-            vDate = datetime(dateTokens{end}, 'InputFormat', 'yyyyMMdd');
-        catch
-            % Leave as today if parsing fails
-        end
+        try, vDate = datetime(dateTokens{end}, 'InputFormat', 'yyyyMMdd'); catch, end
     end
 end

@@ -33,7 +33,6 @@ function varargout = compute_statistics(varargin)
 end
 
 %% Recompute All Derived Metrics (Ratios, Rates of Change, Aggregates)
-%% Recompute All Derived Metrics (Ratios, Rates of Change, Aggregates)
 function Summary = update_all_metrics()
     Visits = db_manager('get_visits');
     Scans  = db_manager('get_scans');
@@ -58,7 +57,7 @@ function Summary = update_all_metrics()
             Scans.Ratio_Right_L4_L5(s) = Scans.ROI_Right_L4(s) / Scans.ROI_Right_L5(s);
         end
         
-        % NEW: Fixed-width Left & Right L4/L5 ratio
+        % Fixed-width Left & Right L4/L5 ratio
         if ismember('ROI_Left_L4_fw', Scans.Properties.VariableNames)
             if ~isnan(Scans.ROI_Left_L4_fw(s)) && ~isnan(Scans.ROI_Left_L5_fw(s)) && Scans.ROI_Left_L5_fw(s) ~= 0
                 Scans.Ratio_Left_L4_L5_fw(s) = Scans.ROI_Left_L4_fw(s) / Scans.ROI_Left_L5_fw(s);
