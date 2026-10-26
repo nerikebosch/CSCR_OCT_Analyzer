@@ -152,24 +152,35 @@ function oct_dashboard()
     tblAllVisits.CellSelectionCallback = @(~, e) on_table_cell_selected(e);
 
     % Tab 4: Texture Distribution Curves (PDF Viewer)
-    tabDist = uitab(tabGroup, 'Title', 'Texture Distributions (PDFs)');
+    tabDist = uitab(tabGroup, 'Title', 'All Textures & GoF (Longitudinal)');
     gridDist = uigridlayout(tabDist, [2, 1]);
     gridDist.RowHeight = {40, '1x'};
-    gridDist.Padding = [10, 10, 10, 10];
+    gridDist.Padding = [5, 5, 5, 5];
     
     distControlPanel = uipanel(gridDist, 'BorderType', 'none');
-    distControlGrid = uigridlayout(distControlPanel, [1, 3]);
-    distControlGrid.ColumnWidth = {250, 250, '1x'};
-    distControlGrid.Padding = [0,0,0,0];
+    distControlGrid = uigridlayout(distControlPanel, [1, 2]);
+    distControlGrid.ColumnWidth = {200, '1x'};
     
-    uilabel(distControlGrid, 'Text', 'Select Layer to Visualize:', 'FontWeight', 'bold');
+    uilabel(distControlGrid, 'Text', 'Select ROI to Evaluate:', 'FontWeight', 'bold');
     ddDistLayer = uidropdown(distControlGrid, ...
         'Items', {'Left L1', 'Left L2', 'Left L3', 'Left L4', 'Left L5', 'Right L1', 'Right L2', 'Right L3', 'Right L4', 'Right L5'}, ...
         'ItemsData', {'Left_L1', 'Left_L2', 'Left_L3', 'Left_L4', 'Left_L5', 'Right_L1', 'Right_L2', 'Right_L3', 'Right_L4', 'Right_L5'}, ...
         'ValueChangedFcn', @(~,~) render_distribution_plot());
         
-    axDist = uiaxes(gridDist);
-    axDist.FontSize = 11;
+    % Create a Scrollable Panel with a 4x2 Grid for the 8 distributions
+    scrollPanel = uipanel(gridDist, 'Scrollable', 'on', 'BorderType', 'none');
+    axesGrid = uigridlayout(scrollPanel, [4, 2]); 
+    axesGrid.RowHeight = {280, 280, 280, 280}; % Ensure height is large enough to read
+    axesGrid.ColumnSpacing = 15;
+    axesGrid.RowSpacing = 20;
+    
+    % Store the 8 axes in an array so we can loop through them
+    distAxes = gobjects(8, 1);
+    for i = 1:8
+        distAxes(i) = uiaxes(axesGrid);
+        distAxes(i).FontSize = 10;
+    end
+
     %% Initialize & Load Data
     SummaryData = [];
     VisitsData  = [];
@@ -272,78 +283,82 @@ function oct_dashboard()
     end
 
 function render_distribution_plot()
-        if isempty(ScansData), return; end
-        cla(axDist);
+        if isempty(SummaryData), return; end
         
-        % Get the target data from the UI selections
         eye = char(ddEyeSelect.Value);
         mode = char(ddRoiMode.Value);
         sfx = ''; if strcmp(mode, 'fw'), sfx = '_fw'; end
-        layer_selection = char(ddDistLayer.Value); % e.g., 'Left_L4'
+        layer_selection = char(ddDistLayer.Value); 
         
-        % Get the current visit number
-        tok = regexp(ddVisit.Value, 'Visit (\d+)', 'tokens');
-        if isempty(tok), return; end
-        currVisitNum = str2double(tok{1}{1});
-        
-        % Find the row in the Scans Database
-        % We take the FIRST slice (ImageIndex = 1) for the distribution visualization
-        scanRow = ScansData(ScansData.VisitNum == currVisitNum & ScansData.EyeSide == eye & ScansData.ImageIndex == 1, :);
-        if isempty(scanRow)
-            title(axDist, 'No scan data available for this visit/eye combination.', 'FontWeight', 'normal');
-            return;
+        visits = SummaryData.VisitNum;
+        if eye == "OD"
+            th_data = SummaryData.CentralThickness_OD;
+        else
+            th_data = SummaryData.CentralThickness_OS;
         end
         
-        % Extract the parameters for the selected layer
-        base_col = sprintf('ROI_%s', layer_selection); % e.g. 'ROI_Left_L4'
-        try
-            gam_a = scanRow.(sprintf('%s_GAM_A%s', base_col, sfx))(1);
-            gam_b = scanRow.(sprintf('%s_GAM_B%s', base_col, sfx))(1);
-            nk_mu = scanRow.(sprintf('%s_NK_mu%s', base_col, sfx))(1);
-            nk_om = scanRow.(sprintf('%s_NK_om%s', base_col, sfx))(1);
-            exp_mu = scanRow.(sprintf('%s_EXP%s', base_col, sfx))(1);
-            ray_b = scanRow.(sprintf('%s_RAY%s', base_col, sfx))(1);
-            wbl_a = scanRow.(sprintf('%s_WBL_A%s', base_col, sfx))(1);
-            wbl_b = scanRow.(sprintf('%s_WBL_B%s', base_col, sfx))(1);
-        catch
-            title(axDist, 'Missing parameter data. Please re-run batch processing.', 'Color', 'red');
-            return;
+        % The 8 distributions to loop through
+        dist_names = {'Gamma', 'Nakagami', 'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'};
+        dist_tags = {'GAM', 'NK', 'RAY', 'WBL', 'LN', 'EXP', 'BURR', 'K'};
+        % Defines the parameters for each (some have 1, some have 2)
+        params = {{'A','B'}, {'mu','om'}, {'B'}, {'A','B'}, {'mu','sig'}, {'mu'}, {'A','B'}, {'A','B'}};
+        
+        for k = 1:8
+            ax = distAxes(k);
+            cla(ax); yyaxis(ax, 'left'); cla(ax); yyaxis(ax, 'right'); cla(ax);
+            
+            tag = dist_tags{k};
+            pList = params{k};
+            
+            % Construct DB Column Names based on the median table
+            % e.g., 'Median_OD_Left_L4_GoF_GAM'
+            gof_col = sprintf('Median_%s_%s_GoF_%s%s', eye, layer_selection, tag, sfx);
+            
+            if ~ismember(gof_col, SummaryData.Properties.VariableNames)
+                title(ax, [dist_names{k} ' (No Data)'], 'Color', 'r');
+                continue;
+            end
+            
+            gof_data = SummaryData.(gof_col);
+            
+            % --- PLOTTING ---
+            % LEFT AXIS: GoF and Parameters
+            yyaxis(ax, 'left');
+            hold(ax, 'on');
+            
+            % Plot GoF (thick black dashed line - lower is better)
+            plot(ax, visits, gof_data, 'k--o', 'LineWidth', 1.5, 'MarkerFaceColor', 'k', 'DisplayName', 'GoF (Error)');
+            
+            % Plot Shape Parameters
+            colors = {[0.2 0.5 0.8], [0.8 0.4 0.2]};
+            for p = 1:length(pList)
+                param_col = sprintf('Median_%s_%s_%s_%s%s', eye, layer_selection, tag, pList{p}, sfx);
+                if ismember(param_col, SummaryData.Properties.VariableNames)
+                    param_data = SummaryData.(param_col);
+                    plot(ax, visits, param_data, '-s', 'Color', colors{p}, 'LineWidth', 1.2, 'MarkerFaceColor', colors{p}, 'DisplayName', ['Param ' pList{p}]);
+                end
+            end
+            
+            ylabel(ax, 'GoF Score & Parameters', 'FontWeight', 'bold');
+            hold(ax, 'off');
+            
+            % RIGHT AXIS: Central Thickness
+            yyaxis(ax, 'right');
+            validTh = ~isnan(th_data);
+            if any(validTh)
+                plot(ax, visits(validTh), th_data(validTh), '-d', 'Color', [0.85 0.35 0.1 0.4], 'LineWidth', 1.5, 'DisplayName', 'Thickness');
+            end
+            ylabel(ax, 'Thickness (\mum)');
+            
+            % Formatting
+            title(ax, sprintf('%s Distribution', dist_names{k}), 'FontWeight', 'bold', 'FontSize', 12);
+            xlim(ax, [min(visits)-0.5, max(visits)+0.5]);
+            xticks(ax, visits);
+            grid(ax, 'on');
+            if k == 1 || k == 2 % Only show legend on top charts to save space
+                legend(ax, 'Location', 'best', 'FontSize', 8);
+            end
         end
-        
-        if isnan(gam_a)
-            title(axDist, 'Layer data is NaN (tissue not found in this scan).');
-            return;
-        end
-        
-        % Generate the X-axis mathematically based on the Gamma mean
-        dist_mean = gam_a * gam_b;
-        dist_std = sqrt(gam_a * (gam_b^2));
-        x_max = dist_mean + (4 * dist_std);
-        x = linspace(0.001, x_max, 1000);
-        
-        % Calculate all the PDF curves
-        pdf_gam = gampdf(x, gam_a, gam_b);
-        pdf_exp = exppdf(x, exp_mu);
-        pdf_ray = raylpdf(x, ray_b);
-        pdf_wbl = wblpdf(x, wbl_a, wbl_b);
-        pd_nk = makedist('Nakagami', nk_mu, nk_om);
-        pdf_nk = pdf(pd_nk, x);
-        
-        % Plot them all on one graph
-        hold(axDist, 'on');
-        plot(axDist, x, pdf_gam, 'LineWidth', 2.5, 'Color', [0.8 0.2 0.2], 'DisplayName', 'Gamma Distribution');
-        plot(axDist, x, pdf_nk, 'LineWidth', 2, 'Color', [0.2 0.6 0.2], 'LineStyle', '--', 'DisplayName', 'Nakagami Distribution');
-        plot(axDist, x, pdf_ray, 'LineWidth', 1.5, 'Color', [0.2 0.2 0.8], 'DisplayName', 'Rayleigh Distribution');
-        plot(axDist, x, pdf_wbl, 'LineWidth', 1.5, 'Color', [0.8 0.5 0.1], 'DisplayName', 'Weibull Distribution');
-        plot(axDist, x, pdf_exp, 'LineWidth', 1, 'Color', [0.4 0.4 0.4], 'LineStyle', ':', 'DisplayName', 'Exponential (Reference)');
-        hold(axDist, 'off');
-        
-        % 7. Format the graph beautifully
-        title(axDist, sprintf('Texture Distributions for %s | Visit %d (%s)', strrep(layer_selection, '_', ' '), currVisitNum, eye), 'FontWeight', 'bold', 'FontSize', 14);
-        xlabel(axDist, 'Transformed Pixel Intensity', 'FontWeight', 'bold');
-        ylabel(axDist, 'Probability Density', 'FontWeight', 'bold');
-        grid(axDist, 'on'); box(axDist, 'on');
-        legend(axDist, 'Location', 'northeast', 'FontSize', 11);
     end
 
     function on_visit_selected()

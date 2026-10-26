@@ -133,15 +133,21 @@ function record = extract_texture_metrics(record, stats_struct, sideName, suffix
             record.(sprintf('ROI_%s_L%d%s', sideName, i, suffix)) = st.CR;
             record.(sprintf('ROI_%s_L%d_Densito%s', sideName, i, suffix)) = st.Densito;
             
-            % PDF Parameters
+            % All 8 Distribution Parameters
             record.(sprintf('ROI_%s_L%d_GAM_A%s', sideName, i, suffix)) = st.GAM(1);
             record.(sprintf('ROI_%s_L%d_GAM_B%s', sideName, i, suffix)) = st.GAM(2);
             record.(sprintf('ROI_%s_L%d_NK_mu%s', sideName, i, suffix)) = st.NK(1);
             record.(sprintf('ROI_%s_L%d_NK_om%s', sideName, i, suffix)) = st.NK(2);
-            record.(sprintf('ROI_%s_L%d_EXP%s', sideName, i, suffix)) = st.EXP(1);
-            record.(sprintf('ROI_%s_L%d_RAY%s', sideName, i, suffix)) = st.RAY(1);
+            record.(sprintf('ROI_%s_L%d_EXP_mu%s', sideName, i, suffix)) = st.EXP(1);
+            record.(sprintf('ROI_%s_L%d_RAY_B%s', sideName, i, suffix)) = st.RAY(1);
             record.(sprintf('ROI_%s_L%d_WBL_A%s', sideName, i, suffix)) = st.WBL(1);
             record.(sprintf('ROI_%s_L%d_WBL_B%s', sideName, i, suffix)) = st.WBL(2);
+            record.(sprintf('ROI_%s_L%d_LN_mu%s', sideName, i, suffix)) = st.LN(1);
+            record.(sprintf('ROI_%s_L%d_LN_sig%s', sideName, i, suffix)) = st.LN(2);
+            record.(sprintf('ROI_%s_L%d_BURR_A%s', sideName, i, suffix)) = st.BURR(1);
+            if length(st.BURR) > 1, record.(sprintf('ROI_%s_L%d_BURR_B%s', sideName, i, suffix)) = st.BURR(2); end
+            record.(sprintf('ROI_%s_L%d_K_A%s', sideName, i, suffix)) = st.K(1);
+            if length(st.K) > 1, record.(sprintf('ROI_%s_L%d_K_B%s', sideName, i, suffix)) = st.K(2); end
             
             % Goodness of Fit (GoF) Array: [BURR, EXP, GAM, K, LN, NK, RAY, WBL]
             if isfield(st, 'GOF') && length(st.GOF) == 8

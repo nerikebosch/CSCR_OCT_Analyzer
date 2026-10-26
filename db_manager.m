@@ -54,7 +54,6 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
     changed = false;
     nRows = height(DB.Scans);
     
-    % Generate ALL required column names dynamically
     requiredCols = {'Ratio_Left_L4_L5', 'Ratio_Right_L4_L5', 'RateOfChange_Left', 'RateOfChange_Right', ...
                     'Ratio_Left_L4_L5_fw', 'Ratio_Right_L4_L5_fw', 'RateOfChange_Left_fw', 'RateOfChange_Right_fw'};
     for side = ["Right", "Left", "Full"]
@@ -63,15 +62,21 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
                 requiredCols{end+1} = sprintf('ROI_%s_L%d%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_Densito%s', side, L, sfx);
                 
-                % PDF Parameters
+                % All Parameters
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_A%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_B%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_NK_mu%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_NK_om%s', side, L, sfx);
-                requiredCols{end+1} = sprintf('ROI_%s_L%d_EXP%s', side, L, sfx);
-                requiredCols{end+1} = sprintf('ROI_%s_L%d_RAY%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_EXP_mu%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_RAY_B%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_WBL_A%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_WBL_B%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_LN_mu%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_LN_sig%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_BURR_A%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_BURR_B%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_K_A%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_K_B%s', side, L, sfx);
                 
                 % Goodness of Fit (GoF)
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_BURR%s', side, L, sfx);
@@ -94,10 +99,10 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
     end
     
     if changed
-        DB.Version = '1.4';
-        data.DB = DB; %#ok<STRNU>
+        DB.Version = '1.5';
+        data.DB = DB;
         save(dbPath, '-struct', 'data', '-v7.3');
-        fprintf('Database auto-migrated to v1.4 (Added GoF Parameters).\n');
+        fprintf('Database auto-migrated to v1.5 (All 8 Distributions Added).\n');
     end
 end
 
