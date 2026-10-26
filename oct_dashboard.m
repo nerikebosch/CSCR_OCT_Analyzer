@@ -28,11 +28,11 @@ function oct_dashboard()
        
     ddEyeSelect = uidropdown(headerGrid, 'Items', {'Right Eye (OD - Diseased)', 'Left Eye (OS - Healthy)'}, ...
         'ItemsData', {'OD', 'OS'}, 'FontWeight', 'bold', ...
-        'ValueChangedFcn', @(~,~) refresh_all_data());
-
+        'ValueChangedFcn', @(~,~) update_metric_dropdown());
+        
     ddRoiMode = uidropdown(headerGrid, 'Items', {'Legacy ROI (Wide)', 'Fixed-Width ROI (120px)'}, ...
         'ItemsData', {'legacy', 'fw'}, 'FontWeight', 'bold', ...
-        'ValueChangedFcn', @(~,~) refresh_all_data());
+        'ValueChangedFcn', @(~,~) update_metric_dropdown());
         
     btnProcess = uibutton(headerGrid, 'push', 'Text', '+ Process Folder', ...
         'BackgroundColor', [0.2 0.6 0.35], 'FontColor', [1 1 1], 'FontWeight', 'bold', ...
@@ -267,6 +267,8 @@ function oct_dashboard()
             end
         end
         on_metric_changed();
+        render_all_visits_table();
+        render_distribution_plot();
     end
 
 function render_distribution_plot()
@@ -584,10 +586,7 @@ function render_distribution_plot()
         
         % Get the metric chosen by the user in the dropdown
         selected_metric = ddCorrMetric.Value;
-        
-        % Compute correlation for this specific metric
         targetEye = string(ddEyeSelect.Value); 
-        corrs = compute_statistics('correlations', selected_metric, targetEye);
         
         if targetEye == "OD"
             th_all = SummaryData.CentralThickness_OD;
@@ -596,7 +595,12 @@ function render_distribution_plot()
             th_all = SummaryData.CentralThickness_OS;
             th_label = 'Central Retinal Thickness OS (\mum)';
         end
-
+        
+        % Ensure data exists before plotting
+        if ~ismember(selected_metric, SummaryData.Properties.VariableNames)
+            return;
+        end
+        
         valid = ~isnan(th_all) & ~isnan(SummaryData.(selected_metric));
         xMetric = SummaryData.(selected_metric)(valid);
         yTh = th_all(valid);
@@ -605,31 +609,43 @@ function render_distribution_plot()
         hold(axCorr, 'on');
         scatter(axCorr, xMetric, yTh, 55, [0.2 0.4 0.75], 'filled', 'MarkerEdgeColor', 'k');
         
-        % Fit regression line (Predicting Thickness from Speckle Biomarker)
+        % IN-MEMORY MATH: Calculate Pearson, Spearman, and R^2 directly instantly
         if length(xMetric) > 1
+            [r_pearson, p_pearson] = corr(xMetric, yTh, 'Type', 'Pearson');
+            [r_spearman, p_spearman] = corr(xMetric, yTh, 'Type', 'Spearman');
+            
+            % Linear regression line and R-squared calculation
             p = polyfit(xMetric, yTh, 1);
+            yfit = polyval(p, xMetric);
+            SSresid = sum((yTh - yfit).^2);
+            SStotal = (length(yTh)-1) * var(yTh);
+            R_squared = 1 - (SSresid/SStotal);
+            
             xRange = max(xMetric) - min(xMetric);
             if xRange == 0, xRange = 0.1; end
             xMargin = xRange * 0.08;
             xLine = linspace(min(xMetric) - xMargin, max(xMetric) + xMargin, 100);
             yLine = polyval(p, xLine);
             plot(axCorr, xLine, yLine, 'r-', 'LineWidth', 1.8);
+        else
+            r_pearson = NaN; p_pearson = NaN;
+            r_spearman = NaN; p_spearman = NaN; R_squared = NaN;
         end
         
         xlabel(axCorr, metric_label, 'FontWeight', 'bold');
         ylabel(axCorr, th_label, 'FontWeight', 'bold');
         title(axCorr, sprintf('Biomarker Prediction: %s vs. %s (r = %.3f)', ...
-            metric_label, th_label, corrs.Pearson_r), 'FontWeight', 'bold');
+            metric_label, th_label, r_pearson), 'FontWeight', 'bold');
         grid(axCorr, 'on'); box(axCorr, 'on');
         hold(axCorr, 'off');
         
-        % Update metrics card
-        lblPearson.Text  = sprintf('Pearson r: %.4f (p = %.3e)', corrs.Pearson_r, corrs.Pearson_p);
-        lblSpearman.Text = sprintf('Spearman \\rho: %.4f (p = %.3e)', corrs.Spearman_rho, corrs.Spearman_p);
-        lblR2.Text       = sprintf('Linear R^2: %.4f', corrs.R_squared);
-        lblAnalyzedN.Text= sprintf('Analyzed Visits: %d of %d', corrs.N, height(SummaryData));
+        % Update metrics card instantly
+        lblPearson.Text  = sprintf('Pearson r: %.4f (p = %.3e)', r_pearson, p_pearson);
+        lblSpearman.Text = sprintf('Spearman \\rho: %.4f (p = %.3e)', r_spearman, p_spearman);
+        lblR2.Text       = sprintf('Linear R^2: %.4f', R_squared);
+        lblAnalyzedN.Text= sprintf('Analyzed Visits: %d of %d', sum(valid), height(SummaryData));
         
-        if corrs.Pearson_p < 0.05
+        if p_pearson < 0.05
             lblSignif.Text = 'Significance: Statistically Significant (p < 0.05)';
             lblSignif.FontColor = [0.15 0.6 0.2];
         else
