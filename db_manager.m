@@ -62,6 +62,7 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
             for sfx = ["", "_fw"]
                 requiredCols{end+1} = sprintf('ROI_%s_L%d%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_Densito%s', side, L, sfx);
+                
                 % PDF Parameters
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_A%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_B%s', side, L, sfx);
@@ -71,6 +72,16 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_RAY%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_WBL_A%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_WBL_B%s', side, L, sfx);
+                
+                % Goodness of Fit (GoF)
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_BURR%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_EXP%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_GAM%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_K%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_LN%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_NK%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_RAY%s', side, L, sfx);
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_GoF_WBL%s', side, L, sfx);
             end
         end
     end
@@ -83,10 +94,10 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
     end
     
     if changed
-        DB.Version = '1.3';
-        data.DB = DB; 
+        DB.Version = '1.4';
+        data.DB = DB; %#ok<STRNU>
         save(dbPath, '-struct', 'data', '-v7.3');
-        fprintf('Database auto-migrated to v1.3 (Added Full PDF Parameters).\n');
+        fprintf('Database auto-migrated to v1.4 (Added GoF Parameters).\n');
     end
 end
 
