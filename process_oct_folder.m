@@ -120,8 +120,7 @@ function visitNum = process_oct_folder(folderPath, options)
     fprintf('Folder processing complete! Database updated for Visit #%d.\n\n', visitNum);
 end
 
-%% Helper to dynamically map CR, Densito, GAM, and NK into the DB fields
-%% Helper to dynamically map ALL PDF parameters into the DB fields
+%% Helper to dynamically map ALL PDF parameters AND GoF into the DB fields
 function record = extract_texture_metrics(record, stats_struct, sideName, suffix)
     if isempty(stats_struct) || ~isstruct(stats_struct), return; end
     if strcmp(sideName, 'Full'), structPrefix = 'Layer'; else, structPrefix = sideName(1); end
@@ -134,15 +133,33 @@ function record = extract_texture_metrics(record, stats_struct, sideName, suffix
             record.(sprintf('ROI_%s_L%d%s', sideName, i, suffix)) = st.CR;
             record.(sprintf('ROI_%s_L%d_Densito%s', sideName, i, suffix)) = st.Densito;
             
-            % PDF Parameters (All needed for plotting the curves)
+            % All 8 Distribution Parameters
             record.(sprintf('ROI_%s_L%d_GAM_A%s', sideName, i, suffix)) = st.GAM(1);
             record.(sprintf('ROI_%s_L%d_GAM_B%s', sideName, i, suffix)) = st.GAM(2);
             record.(sprintf('ROI_%s_L%d_NK_mu%s', sideName, i, suffix)) = st.NK(1);
             record.(sprintf('ROI_%s_L%d_NK_om%s', sideName, i, suffix)) = st.NK(2);
-            record.(sprintf('ROI_%s_L%d_EXP%s', sideName, i, suffix)) = st.EXP(1);
-            record.(sprintf('ROI_%s_L%d_RAY%s', sideName, i, suffix)) = st.RAY(1);
+            record.(sprintf('ROI_%s_L%d_EXP_mu%s', sideName, i, suffix)) = st.EXP(1);
+            record.(sprintf('ROI_%s_L%d_RAY_B%s', sideName, i, suffix)) = st.RAY(1);
             record.(sprintf('ROI_%s_L%d_WBL_A%s', sideName, i, suffix)) = st.WBL(1);
             record.(sprintf('ROI_%s_L%d_WBL_B%s', sideName, i, suffix)) = st.WBL(2);
+            record.(sprintf('ROI_%s_L%d_LN_mu%s', sideName, i, suffix)) = st.LN(1);
+            record.(sprintf('ROI_%s_L%d_LN_sig%s', sideName, i, suffix)) = st.LN(2);
+            record.(sprintf('ROI_%s_L%d_BURR_A%s', sideName, i, suffix)) = st.BURR(1);
+            if length(st.BURR) > 1, record.(sprintf('ROI_%s_L%d_BURR_B%s', sideName, i, suffix)) = st.BURR(2); end
+            record.(sprintf('ROI_%s_L%d_K_A%s', sideName, i, suffix)) = st.K(1);
+            if length(st.K) > 1, record.(sprintf('ROI_%s_L%d_K_B%s', sideName, i, suffix)) = st.K(2); end
+            
+            % Goodness of Fit (GoF) Array: [BURR, EXP, GAM, K, LN, NK, RAY, WBL]
+            if isfield(st, 'GOF') && length(st.GOF) == 8
+                record.(sprintf('ROI_%s_L%d_GoF_BURR%s', sideName, i, suffix)) = st.GOF(1);
+                record.(sprintf('ROI_%s_L%d_GoF_EXP%s',  sideName, i, suffix)) = st.GOF(2);
+                record.(sprintf('ROI_%s_L%d_GoF_GAM%s',  sideName, i, suffix)) = st.GOF(3);
+                record.(sprintf('ROI_%s_L%d_GoF_K%s',    sideName, i, suffix)) = st.GOF(4);
+                record.(sprintf('ROI_%s_L%d_GoF_LN%s',   sideName, i, suffix)) = st.GOF(5);
+                record.(sprintf('ROI_%s_L%d_GoF_NK%s',   sideName, i, suffix)) = st.GOF(6);
+                record.(sprintf('ROI_%s_L%d_GoF_RAY%s',  sideName, i, suffix)) = st.GOF(7);
+                record.(sprintf('ROI_%s_L%d_GoF_WBL%s',  sideName, i, suffix)) = st.GOF(8);
+            end
         end
     end
 end
