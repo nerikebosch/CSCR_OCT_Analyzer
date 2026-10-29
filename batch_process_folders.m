@@ -1,5 +1,6 @@
 % batch_reprocess_all.m
 clear; clc;
+addpath(genpath(fullfile(pwd, 'stats_utils')));
 db_manager('init');
 
 % Select the MAIN folder containing ALL the DATE sub-folders

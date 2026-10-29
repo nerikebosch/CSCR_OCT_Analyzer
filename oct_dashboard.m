@@ -120,17 +120,26 @@ function oct_dashboard()
     
     % Tab 2: Clinical Correlations
     tabCorr = uitab(tabGroup, 'Title', 'Thickness vs. Speckle Correlations');
-    gridCorr = uigridlayout(tabCorr, [3, 1]);
-    gridCorr.RowHeight = {40, '1x', 140};
+    gridCorr = uigridlayout(tabCorr, [4, 1]);
+    gridCorr.RowHeight = {40, 190, '1x', 140};
     gridCorr.Padding = [10, 10, 10, 10];
-    
+
     % Dropdown to select which layer/ratio to correlate
     panelDropdown = uipanel(gridCorr, 'BorderType', 'none');
-    
+
     lblDrop = uilabel(panelDropdown, 'Text', 'Select Metric to Correlate:', 'Position', [10, 10, 180, 22], 'FontWeight', 'bold');
     ddCorrMetric = uidropdown(panelDropdown, 'Position', [195, 10, 280, 22], ...
         'ValueChangedFcn', @(~,~) on_metric_changed());
-        
+
+    % Overview of every metric in the dropdown that correlates significantly with thickness
+    panelSignif = uipanel(gridCorr, 'Title', 'Statistically Significant Metrics (p < 0.05)', ...
+                          'FontSize', 11, 'FontWeight', 'bold');
+    gridSignif = uigridlayout(panelSignif, [1, 1]);
+    gridSignif.Padding = [4, 4, 4, 4];
+    tblSignif = uitable(gridSignif, 'FontSize', 10);
+    tblSignif.CellSelectionCallback = @(~, e) on_signif_row_selected(e);
+    sigVars = {};
+
     axCorr = uiaxes(gridCorr);
     axCorr.FontSize = 11;
     panelCorrSummary = uipanel(gridCorr, 'Title', 'Correlation Analysis Findings', 'FontSize', 11, 'FontWeight', 'bold');
@@ -167,19 +176,37 @@ function oct_dashboard()
         'ItemsData', {'Left_L1', 'Left_L2', 'Left_L3', 'Left_L4', 'Left_L5', 'Right_L1', 'Right_L2', 'Right_L3', 'Right_L4', 'Right_L5'}, ...
         'ValueChangedFcn', @(~,~) render_distribution_plot());
         
-    % Create a Scrollable Panel with a 4x2 Grid for the 8 distributions
-    scrollPanel = uipanel(gridDist, 'Scrollable', 'on', 'BorderType', 'none');
-    axesGrid = uigridlayout(scrollPanel, [4, 2]); 
-    axesGrid.RowHeight = {280, 280, 280, 280}; % Ensure height is large enough to read
+    % Scrollable grid: best-fit summary table on top, then a 4x2 block for the 8 distributions.
+    % The grid itself must be scrollable (a grid inside a scrollable panel just shrinks to fit).
+    axesGrid = uigridlayout(gridDist, [5, 2], 'Scrollable', 'on');
+    axesGrid.RowHeight = {300, 280, 280, 280, 280}; % Fixed heights so content overflows and scrolls
     axesGrid.ColumnSpacing = 15;
     axesGrid.RowSpacing = 20;
-    
+
+    % Best-fit ranking across all ROIs (lowest median RMSE vs. KDE wins)
+    panelBestFit = uipanel(axesGrid, 'Title', 'Best-Fitting Distribution per ROI (lowest median GoF RMSE across visits)', ...
+                           'FontSize', 11, 'FontWeight', 'bold');
+    panelBestFit.Layout.Row = 1;
+    panelBestFit.Layout.Column = [1 2];
+    gridBestFit = uigridlayout(panelBestFit, [1, 1]);
+    gridBestFit.Padding = [4, 4, 4, 4];
+    tblBestFit = uitable(gridBestFit, 'FontSize', 10);
+    tblBestFit.CellSelectionCallback = @(~, e) on_bestfit_row_selected(e);
+
     % Store the 8 axes in an array so we can loop through them
     distAxes = gobjects(8, 1);
     for i = 1:8
         distAxes(i) = uiaxes(axesGrid);
+        distAxes(i).Layout.Row = 2 + floor((i-1) / 2);
+        distAxes(i).Layout.Column = 1 + mod(i-1, 2);
         distAxes(i).FontSize = 10;
     end
+
+    % The 8 distributions (shared by the plots and the best-fit ranking)
+    dist_names = {'Gamma', 'Nakagami', 'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'};
+    dist_tags = {'GAM', 'NK', 'RAY', 'WBL', 'LN', 'EXP', 'BURR', 'K'};
+    % Fitted parameters for each (some have 1, some have 2)
+    dist_params = {{'A','B'}, {'mu','om'}, {'B'}, {'A','B'}, {'mu','sig'}, {'mu'}, {'A','B'}, {'A','B'}};
 
     %% Initialize & Load Data
     SummaryData = [];
@@ -240,7 +267,7 @@ function oct_dashboard()
             dispNames{end+1} = sprintf('%s ROI: CR Ratio L3/L4', side); dbVars{end+1} = sprintf('Median_%s_%s_Ratio_L3_L4%s', eye, side, sfx);
             dispNames{end+1} = sprintf('%s ROI: CR Ratio L4/L5', side); dbVars{end+1} = sprintf('Median_%s_%s_Ratio_L4_L5%s', eye, side, sfx);
             
-            % 2. Loop through all 5 layers to add CR, Densito, Gamma, Nakagami
+            % 2. Loop through all 5 layers to add CR, Densito and the best-fit distribution's parameters
             for L = 1:5
                 % Speckle Contrast (CR)
                 dispNames{end+1} = sprintf('%s ROI: Contrast (CR) L%d', side, L);
@@ -250,18 +277,23 @@ function oct_dashboard()
                 dispNames{end+1} = sprintf('%s ROI: Densitometry L%d', side, L);
                 dbVars{end+1} = sprintf('Median_%s_%s_L%d_Densito%s', eye, side, L, sfx);
                 
-                % Gamma Shape Parameter
-                dispNames{end+1} = sprintf('%s ROI: Gamma Shape L%d', side, L);
-                dbVars{end+1} = sprintf('Median_%s_%s_L%d_GAM%s', eye, side, L, sfx);
-                
-                % Nakagami Mu
-                dispNames{end+1} = sprintf('%s ROI: Nakagami \\mu L%d', side, L);
-                dbVars{end+1} = sprintf('Median_%s_%s_L%d_NK%s', eye, side, L, sfx);
+                % Parameters of the best-fitting distribution for this ROI only
+                % (parameters of a poorly fitting model have no physical meaning)
+                roi = sprintf('%s_L%d', side, L);
+                [~, bestK] = rank_distributions(get_gof_matrix(roi));
+                if bestK > 0
+                    pList = dist_params{bestK};
+                    for p = 1:numel(pList)
+                        dispNames{end+1} = sprintf('%s ROI: %s %s L%d (best fit)', side, dist_names{bestK}, pList{p}, L);
+                        dbVars{end+1} = sprintf('Median_%s_%s_%s_%s%s', eye, roi, dist_tags{bestK}, pList{p}, sfx);
+                    end
+                end
             end
         end
         
         ddCorrMetric.Items = dispNames;
         ddCorrMetric.ItemsData = dbVars;
+        render_significance_table();
         
         % Reconstruct their selection for the new mode/eye
         if isempty(curr_val)
@@ -297,12 +329,11 @@ function render_distribution_plot()
             th_data = SummaryData.CentralThickness_OS;
         end
         
-        % The 8 distributions to loop through
-        dist_names = {'Gamma', 'Nakagami', 'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'};
-        dist_tags = {'GAM', 'NK', 'RAY', 'WBL', 'LN', 'EXP', 'BURR', 'K'};
-        % Defines the parameters for each (some have 1, some have 2)
-        params = {{'A','B'}, {'mu','om'}, {'B'}, {'A','B'}, {'mu','sig'}, {'mu'}, {'A','B'}, {'A','B'}};
-        
+        params = dist_params;
+
+        render_bestfit_table();
+        [~, bestK] = rank_distributions(get_gof_matrix(layer_selection));
+
         for k = 1:8
             ax = distAxes(k);
             cla(ax); yyaxis(ax, 'left'); cla(ax); yyaxis(ax, 'right'); cla(ax);
@@ -327,7 +358,7 @@ function render_distribution_plot()
             hold(ax, 'on');
             
             % Plot GoF (thick black dashed line - lower is better)
-            plot(ax, visits, gof_data, 'k--o', 'LineWidth', 1.5, 'MarkerFaceColor', 'k', 'DisplayName', 'GoF (Error)');
+            plot(ax, visits, gof_data, 'r--o', 'LineWidth', 1.5, 'MarkerFaceColor', 'k', 'DisplayName', 'GoF (Error)');
             
             % Plot Shape Parameters
             colors = {[0.2 0.5 0.8], [0.8 0.4 0.2]};
@@ -350,14 +381,96 @@ function render_distribution_plot()
             end
             ylabel(ax, 'Thickness (\mum)');
             
-            % Formatting
-            title(ax, sprintf('%s Distribution', dist_names{k}), 'FontWeight', 'bold', 'FontSize', 12);
+            % Formatting (highlight the best-fitting distribution for this ROI)
+            if k == bestK
+                title(ax, sprintf('%s Distribution  -  BEST FIT', dist_names{k}), ...
+                      'FontWeight', 'bold', 'FontSize', 12, 'Color', [0.1 0.55 0.2]);
+            else
+                title(ax, sprintf('%s Distribution', dist_names{k}), 'FontWeight', 'bold', 'FontSize', 12);
+            end
             xlim(ax, [min(visits)-0.5, max(visits)+0.5]);
             xticks(ax, visits);
             grid(ax, 'on');
             if k == 1 || k == 2 % Only show legend on top charts to save space
                 legend(ax, 'Location', 'best', 'FontSize', 8);
             end
+        end
+    end
+
+    function G = get_gof_matrix(roi)
+        % Visits x 8 matrix of GoF RMSE values for one ROI (NaN where missing)
+        eye = char(ddEyeSelect.Value);
+        sfx = ''; if strcmp(char(ddRoiMode.Value), 'fw'), sfx = '_fw'; end
+        G = nan(height(SummaryData), 8);
+        if isempty(SummaryData), return; end
+        for k = 1:8
+            col = sprintf('Median_%s_%s_GoF_%s%s', eye, roi, dist_tags{k}, sfx);
+            if ismember(col, SummaryData.Properties.VariableNames)
+                G(:, k) = SummaryData.(col);
+            end
+        end
+    end
+
+    function [order, bestK, medGoF, wins] = rank_distributions(G)
+        % Rank distributions by median GoF across visits (lower RMSE = better fit).
+        % wins(k) = number of visits where distribution k had the lowest GoF.
+        medGoF = median(G, 1, 'omitnan');
+        validRows = any(~isnan(G), 2);
+        wins = zeros(1, 8);
+        if any(validRows)
+            [~, perVisitBest] = min(G(validRows, :), [], 2);
+            wins = accumarray(perVisitBest, 1, [8, 1])';
+        end
+        % NaN medians sort last
+        [~, order] = sort(medGoF, 'ascend', 'MissingPlacement', 'last');
+        bestK = order(1);
+        if isnan(medGoF(bestK)), bestK = 0; end
+    end
+
+    function render_bestfit_table()
+        rois = ddDistLayer.ItemsData;
+        roiNames = ddDistLayer.Items;
+        n = numel(rois);
+        nVisits = sum(any(~isnan(get_gof_matrix(rois{1})), 2));
+        Best = strings(n, 1); BestGoF = nan(n, 1); Won = strings(n, 1);
+        Second = strings(n, 1); SecondGoF = nan(n, 1); Margin = nan(n, 1);
+        for r = 1:n
+            G = get_gof_matrix(rois{r});
+            [order, bestK, medGoF, wins] = rank_distributions(G);
+            nV = sum(any(~isnan(G), 2));
+            if bestK == 0
+                Best(r) = "No Data"; Won(r) = "-";
+                continue;
+            end
+            Best(r) = dist_names{bestK};
+            BestGoF(r) = medGoF(bestK);
+            Won(r) = sprintf('%d / %d', wins(bestK), nV);
+            Second(r) = dist_names{order(2)};
+            SecondGoF(r) = medGoF(order(2));
+            Margin(r) = 100 * (SecondGoF(r) - BestGoF(r)) / SecondGoF(r);
+        end
+        T = table(string(roiNames(:)), Best, BestGoF, Won, Second, SecondGoF, Margin, ...
+            'VariableNames', {'ROI', 'Best Fit', 'Median RMSE', 'Visits Won', ...
+                              'Runner-up', 'Runner-up RMSE', 'Margin (%)'});
+        tblBestFit.Data = T;
+
+        % Highlight the ROI currently shown in the plots below
+        removeStyle(tblBestFit);
+        selIdx = find(strcmp(rois, char(ddDistLayer.Value)), 1);
+        if ~isempty(selIdx)
+            addStyle(tblBestFit, uistyle('BackgroundColor', [0.15 0.35 0.65], 'FontColor', [1 1 1], 'FontWeight', 'bold'), 'row', selIdx);
+        end
+        panelBestFit.Title = sprintf(['Best-Fitting Distribution per ROI  |  lowest median GoF RMSE ' ...
+                                      '(fitted PDF vs. KDE) across %d visits  |  click a row to plot it'], nVisits);
+    end
+
+    function on_bestfit_row_selected(e)
+        if isempty(e.Indices), return; end
+        rois = ddDistLayer.ItemsData;
+        selRow = e.Indices(1);
+        if selRow <= numel(rois) && ~strcmp(ddDistLayer.Value, rois{selRow})
+            ddDistLayer.Value = rois{selRow};
+            render_distribution_plot();
         end
     end
 
@@ -595,6 +708,66 @@ function render_distribution_plot()
         displayT = SummaryData(:, actualCols);
         tblAllVisits.Data = displayT;
     end
+    function render_significance_table()
+        % Correlate every dropdown metric with central thickness and list the significant ones
+        if isempty(SummaryData), return; end
+        if ddEyeSelect.Value == "OD"
+            th_all = SummaryData.CentralThickness_OD;
+        else
+            th_all = SummaryData.CentralThickness_OS;
+        end
+
+        vars = ddCorrMetric.ItemsData;
+        names = ddCorrMetric.Items;
+        m = numel(vars);
+        rP = nan(m, 1); pP = nan(m, 1); rS = nan(m, 1); pS = nan(m, 1); nV = zeros(m, 1);
+        for i = 1:m
+            if ~ismember(vars{i}, SummaryData.Properties.VariableNames), continue; end
+            x = SummaryData.(vars{i});
+            valid = ~isnan(th_all) & ~isnan(x);
+            nV(i) = sum(valid);
+            if nV(i) < 3, continue; end
+            [rP(i), pP(i)] = corr(x(valid), th_all(valid), 'Type', 'Pearson');
+            [rS(i), pS(i)] = corr(x(valid), th_all(valid), 'Type', 'Spearman');
+        end
+
+        % Benjamini-Hochberg FDR correction over all tested metrics (Pearson p-values).
+        % With many metrics tested, ~5% will pass p < 0.05 by chance alone.
+        qP = nan(m, 1);
+        tested = find(~isnan(pP));
+        if ~isempty(tested)
+            [ps, ord] = sort(pP(tested));
+            nT = numel(ps);
+            q = ps .* nT ./ (1:nT)';
+            q = min(1, flipud(cummin(flipud(q))));
+            qP(tested(ord)) = q;
+        end
+
+        sig = find(pP < 0.05 | pS < 0.05);
+        [~, ord] = sort(min(pP(sig), pS(sig)));
+        sig = sig(ord);
+        sigVars = vars(sig);
+
+        FDR = repmat("no", numel(sig), 1);
+        FDR(qP(sig) < 0.05) = "yes";
+        T = table(string(names(sig))', rP(sig), pP(sig), rS(sig), pS(sig), qP(sig), FDR, nV(sig), ...
+            'VariableNames', {'Metric', 'Pearson r', 'Pearson p', 'Spearman rho', 'Spearman p', ...
+                              'FDR q', 'Survives FDR', 'Visits'});
+        tblSignif.Data = T;
+        panelSignif.Title = sprintf(['Statistically Significant Metrics vs. Central Thickness %s  |  ' ...
+            '%d of %d metrics with Pearson or Spearman p < 0.05  |  click a row to plot it'], ...
+            char(ddEyeSelect.Value), numel(sig), numel(tested));
+    end
+
+    function on_signif_row_selected(e)
+        if isempty(e.Indices), return; end
+        selRow = e.Indices(1);
+        if selRow <= numel(sigVars)
+            ddCorrMetric.Value = sigVars{selRow};
+            on_metric_changed();
+        end
+    end
+
     function render_correlation_plot()
         if isempty(SummaryData), return; end
         cla(axCorr);
