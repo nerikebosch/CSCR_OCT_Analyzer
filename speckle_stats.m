@@ -32,6 +32,9 @@ STATS.GAM = gamfit(ROI);
 % STATS.GGAM = wggamfit(ROI,0);
 % K - distribution    
 STATS.K = kfit(ROI);
+% kfit has no real solution when the log-intensity variance is too small
+% (sqrt of a negative number), so the K fit is invalid for this ROI
+if ~isreal(STATS.K), STATS.K = [NaN NaN]; end
 % Log-normal
 STATS.LN = lognfit(ROI);
 % Nakagami

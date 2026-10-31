@@ -202,6 +202,30 @@ function oct_dashboard()
         distAxes(i).FontSize = 10;
     end
 
+    % Tab 5: Correlation Matrix per ROI (morphology + speckle statistics across visits)
+    tabMatrix = uitab(tabGroup, 'Title', 'Correlation Matrix (per ROI)');
+    gridMatrix = uigridlayout(tabMatrix, [2, 1]);
+    gridMatrix.RowHeight = {40, '1x'};
+    gridMatrix.Padding = [5, 5, 5, 5];
+
+    matControlGrid = uigridlayout(gridMatrix, [1, 5]);
+    matControlGrid.ColumnWidth = {40, 140, 60, 110, '1x'};
+    matControlGrid.Padding = [0, 0, 0, 0];
+    uilabel(matControlGrid, 'Text', 'ROI:', 'FontWeight', 'bold');
+    ddMatRoi = uidropdown(matControlGrid, 'Items', ddDistLayer.Items, 'ItemsData', ddDistLayer.ItemsData, ...
+        'ValueChangedFcn', @(~,~) render_corr_matrix());
+    uilabel(matControlGrid, 'Text', 'Method:', 'FontWeight', 'bold');
+    ddMatMethod = uidropdown(matControlGrid, 'Items', {'Spearman', 'Pearson'}, ...
+        'ValueChangedFcn', @(~,~) render_corr_matrix());
+    lblMatInfo = uilabel(matControlGrid, 'Text', '', 'FontColor', [0.4 0.4 0.4]);
+
+    axMatrix = uiaxes(gridMatrix);
+
+    % Diverging colormap: blue (-1) -> white (0) -> red (+1)
+    nC = 128; cBlue = [0.2 0.4 0.75]; cRed = [0.8 0.25 0.2];
+    corrCmap = [interp1([0 1], [cBlue; 1 1 1], linspace(0, 1, nC)); ...
+                interp1([0 1], [1 1 1; cRed], linspace(0, 1, nC))];
+
     % The 8 distributions (shared by the plots and the best-fit ranking)
     dist_names = {'Gamma', 'Nakagami', 'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'};
     dist_tags = {'GAM', 'NK', 'RAY', 'WBL', 'LN', 'EXP', 'BURR', 'K'};
@@ -312,6 +336,7 @@ function oct_dashboard()
         on_metric_changed();
         render_all_visits_table();
         render_distribution_plot();
+        render_corr_matrix();
     end
 
 function render_distribution_plot()
@@ -733,15 +758,8 @@ function render_distribution_plot()
 
         % Benjamini-Hochberg FDR correction over all tested metrics (Pearson p-values).
         % With many metrics tested, ~5% will pass p < 0.05 by chance alone.
-        qP = nan(m, 1);
+        qP = fdr_bh(pP);
         tested = find(~isnan(pP));
-        if ~isempty(tested)
-            [ps, ord] = sort(pP(tested));
-            nT = numel(ps);
-            q = ps .* nT ./ (1:nT)';
-            q = min(1, flipud(cummin(flipud(q))));
-            qP(tested(ord)) = q;
-        end
 
         sig = find(pP < 0.05 | pS < 0.05);
         [~, ord] = sort(min(pP(sig), pS(sig)));
@@ -757,6 +775,109 @@ function render_distribution_plot()
         panelSignif.Title = sprintf(['Statistically Significant Metrics vs. Central Thickness %s  |  ' ...
             '%d of %d metrics with Pearson or Spearman p < 0.05  |  click a row to plot it'], ...
             char(ddEyeSelect.Value), numel(sig), numel(tested));
+    end
+
+    function q = fdr_bh(p)
+        % Benjamini-Hochberg adjusted p-values (q); NaN entries are ignored
+        q = nan(size(p));
+        idx = find(~isnan(p));
+        if isempty(idx), return; end
+        [ps, ord] = sort(p(idx));
+        ps = ps(:);
+        nT = numel(ps);
+        qs = ps .* nT ./ (1:nT)';
+        qs = min(1, flipud(cummin(flipud(qs))));
+        q(idx(ord)) = qs;
+    end
+
+    function render_corr_matrix()
+        % Correlation across visits (one value per visit = median of its scans)
+        if isempty(SummaryData), return; end
+        eyeSide = char(ddEyeSelect.Value);
+        sfx = ''; if strcmp(char(ddRoiMode.Value), 'fw'), sfx = '_fw'; end
+        roi = char(ddMatRoi.Value);
+        method = char(ddMatMethod.Value);
+        vn = SummaryData.Properties.VariableNames;
+
+        X = zeros(height(SummaryData), 0);
+        labels = {};
+        function add_var(col, label)
+            if ismember(col, vn)
+                X(:, end+1) = double(SummaryData.(col));
+                labels{end+1} = label;
+            end
+        end
+
+        % Group 1: morphology of the fluid pocket + central thickness (same for every ROI)
+        add_var(sprintf('CentralThickness_%s', eyeSide), 'Central Thickness');
+        holeFeats = {'Area', 'Width', 'Height', 'MeanHeight', 'Perimeter', 'EquivDiam', 'Circularity', ...
+                     'Solidity', 'Extent', 'Eccentricity', 'AspectRatio', 'MeanIntensity', 'CR'};
+        for h = 1:numel(holeFeats)
+            add_var(sprintf('Median_%s_Hole_%s', eyeSide, holeFeats{h}), ['Hole ' holeFeats{h}]);
+        end
+        nMorph = numel(labels);
+
+        % Group 2: speckle statistics of the selected ROI
+        add_var(sprintf('Median_%s_%s%s', eyeSide, roi, sfx), 'CR');
+        add_var(sprintf('Median_%s_%s_Densito%s', eyeSide, roi, sfx), 'Densitometry');
+        for k = 1:8
+            for p = 1:numel(dist_params{k})
+                add_var(sprintf('Median_%s_%s_%s_%s%s', eyeSide, roi, dist_tags{k}, dist_params{k}{p}, sfx), ...
+                        sprintf('%s %s', dist_names{k}, dist_params{k}{p}));
+            end
+        end
+
+        % Drop variables that are empty or constant (correlation undefined)
+        keep = sum(~isnan(X), 1) >= 3 & std(X, 0, 1, 'omitnan') > 0;
+        nMorph = sum(keep(1:nMorph));
+        X = X(:, keep);
+        labels = labels(keep);
+        n = numel(labels);
+
+        cla(axMatrix);
+        if n < 2
+            title(axMatrix, 'Not enough data for a correlation matrix', 'Color', 'r');
+            return;
+        end
+
+        [R, P] = corr(X, 'Type', method, 'Rows', 'pairwise');
+
+        % FDR correction over the unique pairs (upper triangle)
+        upperTri = triu(true(n), 1);
+        Q = nan(n);
+        Q(upperTri) = fdr_bh(P(upperTri));
+        Q = min(Q, Q');
+
+        imagesc(axMatrix, R, 'AlphaData', ~isnan(R));
+        colormap(axMatrix, corrCmap);
+        clim(axMatrix, [-1 1]);
+        cb = colorbar(axMatrix);
+        cb.Label.String = sprintf('%s correlation', method);
+        axis(axMatrix, 'image');
+        set(axMatrix, 'XTick', 1:n, 'XTickLabel', labels, 'XTickLabelRotation', 90, ...
+            'YTick', 1:n, 'YTickLabel', labels, 'TickLabelInterpreter', 'none', 'FontSize', 8);
+        hold(axMatrix, 'on');
+
+        % Separate the morphology block from the speckle-statistics block
+        if nMorph > 0 && nMorph < n
+            plot(axMatrix, [nMorph nMorph] + 0.5, [0.5 n + 0.5], 'k-', 'LineWidth', 2);
+            plot(axMatrix, [0.5 n + 0.5], [nMorph nMorph] + 0.5, 'k-', 'LineWidth', 2);
+        end
+
+        % Mark significant cells: * p < 0.05, ** survives FDR
+        offDiag = (1:n)' ~= (1:n);
+        [ri, ci] = find(P < 0.05 & offDiag);
+        for s = 1:numel(ri)
+            mark = '*';
+            if Q(ri(s), ci(s)) < 0.05, mark = '**'; end
+            text(axMatrix, ci(s), ri(s), mark, 'HorizontalAlignment', 'center', ...
+                 'VerticalAlignment', 'middle', 'FontSize', 9, 'FontWeight', 'bold');
+        end
+        hold(axMatrix, 'off');
+
+        title(axMatrix, sprintf('%s | %s | %s', strrep(roi, '_', ' '), eyeSide, method), 'FontWeight', 'bold');
+        lblMatInfo.Text = sprintf(['%d visits  |  top-left: morphology + thickness, bottom-right: speckle ' ...
+            'statistics  |  * p < 0.05   ** survives FDR (q < 0.05)'], sum(any(~isnan(X), 2)));
     end
 
     function on_signif_row_selected(e)

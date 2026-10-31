@@ -91,6 +91,11 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
         end
     end
     
+    % Fluid pocket (hole) morphology, see hole_morphology.m
+    requiredCols = [requiredCols, {'Hole_Found', 'Hole_Area', 'Hole_Width', 'Hole_Height', ...
+        'Hole_MeanHeight', 'Hole_Perimeter', 'Hole_EquivDiam', 'Hole_Circularity', 'Hole_Solidity', ...
+        'Hole_Extent', 'Hole_Eccentricity', 'Hole_AspectRatio', 'Hole_MeanIntensity', 'Hole_CR'}];
+
     for c = 1:length(requiredCols)
         if ~ismember(requiredCols{c}, DB.Scans.Properties.VariableNames)
             DB.Scans.(requiredCols{c}) = NaN(max(nRows, 0), 1);
@@ -201,8 +206,14 @@ function Summary = get_summary_table(dbPath)
             % DYNAMICALLY GET MEDIAN FOR EVERY SINGLE METRIC
             for c = 1:width(sub)
                 colName = sub.Properties.VariableNames{c};
-                if startsWith(colName, 'ROI_')
-                    Summary.(sprintf('Median_%s_%s', eye, strrep(colName, 'ROI_', '')))(i) = median(sub.(colName), 'omitnan');
+                if startsWith(colName, 'ROI_') || startsWith(colName, 'Hole_')
+                    vals = sub.(colName);
+                    % Complex values come from failed fits (e.g. kfit), treat them as missing
+                    if isnumeric(vals) && ~isreal(vals)
+                        vals(imag(vals) ~= 0) = NaN;
+                        vals = real(vals);
+                    end
+                    Summary.(sprintf('Median_%s_%s', eye, strrep(colName, 'ROI_', '')))(i) = median(vals, 'omitnan');
                 end
             end
             

@@ -76,8 +76,10 @@ function visitNum = process_oct_folder(folderPath, options)
             [I_crop_orig, I_crop_aligned, embeddings_aligned, sy, sx, angle_deg, I_true_raw, geom] = ...
                 preprocess_OCT(folderPath, fileName, MODEL, isLeftEye);
             [Layer_ILM, h1] = segment_ILM(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, options.plotoption);
-            [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = ...
+            [is_hole_found, Mask_Hole, MaxPH, indMaxPH, is_real_hole] = ...
                 detect_hole(I_crop_aligned, MODEL, embeddings_aligned, sy, sx, Layer_ILM, options.plotoption, h1);
+            pixel_um = []; if isfield(options, 'PixelSize_um'), pixel_um = options.PixelSize_um; end
+            HoleMorph = hole_morphology(Mask_Hole, is_real_hole, I_crop_aligned, geom, pixel_um);
             [Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top] = ...
                 segment_layers(I_crop_aligned, MODEL, sy, sx, MaxPH, indMaxPH, Layer_ILM, Mask_Hole, options.plotoption, h1);
             
@@ -108,7 +110,13 @@ function visitNum = process_oct_folder(folderPath, options)
             scanRecord = extract_texture_metrics(scanRecord, STATS_Right_fw, 'Right', '_fw');
             scanRecord = extract_texture_metrics(scanRecord, STATS_Left_fw, 'Left', '_fw');
             scanRecord = extract_texture_metrics(scanRecord, STATS_Full_fw, 'Full', '_fw');
-            
+
+            % Fluid pocket (hole) morphology
+            holeFields = fieldnames(HoleMorph);
+            for f = 1:numel(holeFields)
+                scanRecord.(holeFields{f}) = HoleMorph.(holeFields{f});
+            end
+
             db_manager('save_scan', scanRecord);
             fprintf('      Successfully saved slice %d (Texture values recorded).\n', i);
         catch ME

@@ -1,4 +1,6 @@
-function [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = detect_hole(I_crop, MODEL, embeddings_org, sy, sx, Layer_ILM, plotoption, h1)
+function [is_hole_found, Mask_Hole, MaxPH, indMaxPH, is_real_hole] = detect_hole(I_crop, MODEL, embeddings_org, sy, sx, Layer_ILM, plotoption, h1)
+% is_real_hole is false when no fluid pocket was detected; is_hole_found is then
+% still forced to true (with a virtual central strip as Mask_Hole) so ROIs can be built.
     
     % stretch the image vertically
     stretch_factor = 2;
@@ -96,6 +98,9 @@ function [is_hole_found, Mask_Hole, MaxPH, indMaxPH] = detect_hole(I_crop, MODEL
         end
     end
     
+    % Remember whether a real hole was found (is_hole_found is forced true below if not)
+    is_real_hole = is_hole_found;
+
     % Initialize the original-sized mask
     Mask_Hole = false(sy, sx);
     
