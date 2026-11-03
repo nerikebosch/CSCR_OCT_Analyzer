@@ -8,6 +8,8 @@ function varargout = compute_statistics(varargin)
 %   fig     = compute_statistics('plot')         - Plots longitudinal temporal evolution.
 %   fig     = compute_statistics('plot', savePath) - Saves high-res plot.
 %   report  = compute_statistics('report')       - Generates text report.
+%   T       = compute_statistics('wilcoxon')     - OD vs. OS Wilcoxon signed-rank tests (fixed-width ROIs).
+%   T       = compute_statistics('wilcoxon', 'legacy') - Same, on the legacy (wide) ROIs.
 
     action = 'update_all';
     if ~isempty(varargin), action = lower(varargin{1}); end
@@ -27,6 +29,10 @@ function varargout = compute_statistics(varargin)
             varargout{1} = plot_longitudinal(savePath);
         case 'report'
             varargout{1} = print_stats_report();
+        case 'wilcoxon'
+            roiMode = 'fw';
+            if length(varargin) > 1, roiMode = varargin{2}; end
+            varargout{1} = compute_wilcoxon_od_os(roiMode);
         otherwise
             error('Unknown action in compute_statistics: %s', action);
     end
@@ -148,6 +154,83 @@ function statsOut = compute_correlations(target_metric, targetEye)
     statsOut = struct('MetricName', strrep(target_metric, '_', ' '), 'N', sum(validPairs), ...
                       'Pearson_r', r_pearson, 'Pearson_p', p_pearson, ...
                       'Spearman_rho', r_spearman, 'Spearman_p', p_spearman, 'R_squared', mdl.Rsquared.Ordinary);
+end
+
+%% OD vs. OS Comparison (Wilcoxon Signed-Rank Test for Paired Samples)
+function T = compute_wilcoxon_od_os(roiMode)
+% Compares every speckle metric between the diseased eye (OD) and the fellow eye (OS).
+% Both eyes are scanned at every visit, so the samples are paired by visit and
+% the Wilcoxon signed-rank test (non-parametric, dependent samples) is used.
+% Each pair = the per-visit median of that metric in OD and in OS.
+% Benjamini-Hochberg FDR correction is applied over all tested metrics.
+    if nargin < 1 || isempty(roiMode), roiMode = 'fw'; end
+    sfx = ''; if strcmpi(roiMode, 'fw'), sfx = '_fw'; end
+
+    Summary = db_manager('get_summary');
+    vn = Summary.Properties.VariableNames;
+
+    dist_names  = {'Gamma', 'Nakagami', 'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'};
+    dist_tags   = {'GAM', 'NK', 'RAY', 'WBL', 'LN', 'EXP', 'BURR', 'K'};
+    dist_params = {{'A','B'}, {'mu','om'}, {'B'}, {'A','B'}, {'mu','sig'}, {'mu'}, {'A','B'}, {'A','B'}};
+
+    % Build the list of metrics: {suffix after 'Median_<eye>_', side, layer label, group, display name}
+    M = {};
+    for side = ["Left", "Right"]
+        M(end+1, :) = {sprintf('%s_Ratio_L3_L4', side), side, "L3/L4", "CR ratio", "CR ratio L3/L4"}; %#ok<AGROW>
+        M(end+1, :) = {sprintf('%s_Ratio_L4_L5', side), side, "L4/L5", "CR ratio", "CR ratio L4/L5"}; %#ok<AGROW>
+        for L = 1:5
+            lay = sprintf("L%d", L);
+            M(end+1, :) = {sprintf('%s_L%d', side, L), side, lay, "Contrast (CR)", "CR"}; %#ok<AGROW>
+            M(end+1, :) = {sprintf('%s_L%d_Densito', side, L), side, lay, "Densitometry", "Densitometry"}; %#ok<AGROW>
+            for k = 1:numel(dist_tags)
+                for p = 1:numel(dist_params{k})
+                    M(end+1, :) = {sprintf('%s_L%d_%s_%s', side, L, dist_tags{k}, dist_params{k}{p}), side, lay, ...
+                                   string(dist_names{k}), sprintf("%s %s", dist_names{k}, dist_params{k}{p})}; %#ok<AGROW>
+                end
+            end
+        end
+    end
+
+    n = size(M, 1);
+    N = zeros(n, 1); medOD = nan(n, 1); medOS = nan(n, 1); medDiff = nan(n, 1);
+    W = nan(n, 1); Z = nan(n, 1); P = nan(n, 1); R = nan(n, 1);
+    keep = false(n, 1);
+    for i = 1:n
+        cOD = ['Median_OD_' M{i, 1} sfx];
+        cOS = ['Median_OS_' M{i, 1} sfx];
+        if ~ismember(cOD, vn) || ~ismember(cOS, vn), continue; end
+        x = double(Summary.(cOD)); y = double(Summary.(cOS));
+        ok = ~isnan(x) & ~isnan(y);
+        N(i) = sum(ok);
+        if N(i) < 5 || all(x(ok) == y(ok)), continue; end
+        keep(i) = true;
+        d = x(ok) - y(ok);
+        medOD(i) = median(x(ok)); medOS(i) = median(y(ok)); medDiff(i) = median(d);
+        P(i) = signrank(x(ok), y(ok));                       % exact for small n
+        [~, ~, st] = signrank(x(ok), y(ok), 'method', 'approximate');
+        W(i) = st.signedrank; Z(i) = st.zval;
+        R(i) = abs(st.zval) / sqrt(N(i));                   % effect size r = |z| / sqrt(n)
+    end
+
+    Q = fdr_bh_local(P);
+    T = table(string(M(:, 2)), string(M(:, 3)), string(M(:, 4)), string(M(:, 5)), N, ...
+              medOD, medOS, medDiff, W, Z, P, Q, Q < 0.05, R, string(strcat('Median_OD_', M(:, 1), sfx)), ...
+        'VariableNames', {'Side', 'Layer', 'Group', 'Metric', 'N', 'Median_OD', 'Median_OS', ...
+                          'Median_Diff', 'W', 'Z', 'p', 'q_FDR', 'Survives_FDR', 'Effect_r', 'Column_OD'});
+    T = T(keep, :);
+    T = sortrows(T, 'p');
+end
+
+function q = fdr_bh_local(p)
+    % Benjamini-Hochberg adjusted p-values (q); NaN entries are ignored
+    q = nan(size(p));
+    idx = find(~isnan(p));
+    if isempty(idx), return; end
+    [ps, ord] = sort(p(idx));
+    ps = ps(:); m = numel(ps);
+    qs = ps .* m ./ (1:m)';
+    qs = min(1, flipud(cummin(flipud(qs))));
+    q(idx(ord)) = qs;
 end
 
 %% Publication-Grade Longitudinal Plot

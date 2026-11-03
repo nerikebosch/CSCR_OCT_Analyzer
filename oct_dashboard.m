@@ -9,7 +9,7 @@ function oct_dashboard()
     db_manager('init');
     % Create Main Window
     fig = uifigure('Name', 'OCT Clinical Study Dashboard | CSCR Longitudinal Study', ...
-                   'Position', [80, 60, 1280, 780], ...
+                   'Position', [80, 60, 1280, 780], ... 
                    'Color', [0.95 0.96 0.98]);
     % Main Layout Grid: 2 rows (Header, Content)
     mainGrid = uigridlayout(fig, [2, 1]);
@@ -221,6 +221,43 @@ function oct_dashboard()
 
     axMatrix = uiaxes(gridMatrix);
 
+    % Tab 6: OD vs. OS comparison (Wilcoxon signed-rank, paired by visit)
+    tabWilcox = uitab(tabGroup, 'Title', 'OD vs. OS (Wilcoxon)');
+    gridWilcox = uigridlayout(tabWilcox, [3, 1]);
+    gridWilcox.RowHeight = {40, '1x', '1.6x'};
+    gridWilcox.Padding = [5, 5, 5, 5];
+
+    wilControlGrid = uigridlayout(gridWilcox, [1, 7]);
+    wilControlGrid.ColumnWidth = {50, 170, 50, 90, 120, 150, '1x'};
+    wilControlGrid.Padding = [0, 0, 0, 0];
+    uilabel(wilControlGrid, 'Text', 'Group:', 'FontWeight', 'bold');
+    ddWilGroup = uidropdown(wilControlGrid, ...
+        'Items', {'All metrics', 'Contrast (CR)', 'CR ratio', 'Densitometry', 'Gamma', 'Nakagami', ...
+                  'Rayleigh', 'Weibull', 'Lognormal', 'Exponential', 'Burr', 'K-Distribution'}, ...
+        'ValueChangedFcn', @(~,~) render_wilcoxon_table());
+    uilabel(wilControlGrid, 'Text', 'Layer:', 'FontWeight', 'bold');
+    ddWilLayer = uidropdown(wilControlGrid, 'Items', {'All', 'L1', 'L2', 'L3', 'L4', 'L5', 'L3/L4', 'L4/L5'}, ...
+        'ValueChangedFcn', @(~,~) render_wilcoxon_table());
+    cbWilSig = uicheckbox(wilControlGrid, 'Text', 'Only p < 0.05', 'Value', false, ...
+        'ValueChangedFcn', @(~,~) render_wilcoxon_table());
+    cbWilFdr = uicheckbox(wilControlGrid, 'Text', 'Only survives FDR', 'Value', false, ...
+        'ValueChangedFcn', @(~,~) render_wilcoxon_table());
+    lblWilInfo = uilabel(wilControlGrid, 'Text', '');
+
+    % Dark table with white text (FDR survivors in bold)
+    tblWilcox = uitable(gridWilcox, 'FontSize', 10, 'ForegroundColor', [1 1 1], ...
+        'BackgroundColor', [0.22 0.22 0.22; 0.28 0.28 0.28]);
+    tblWilcox.CellSelectionCallback = @(~, e) on_wilcoxon_row_selected(e);
+
+    % Left and right ROI of the selected layer side by side
+    wilPlotGrid = uigridlayout(gridWilcox, [1, 2]);
+    wilPlotGrid.Padding = [0, 0, 0, 0];
+    axWilLeft = uiaxes(wilPlotGrid);
+    axWilRight = uiaxes(wilPlotGrid);
+    axWilLeft.FontSize = 12; axWilRight.FontSize = 12;
+    WilcoxT = table();      % full result for the current ROI mode
+    WilcoxShown = table();  % rows currently visible in the table
+
     % Diverging colormap: blue (-1) -> white (0) -> red (+1)
     nC = 128; cBlue = [0.2 0.4 0.75]; cRed = [0.8 0.25 0.2];
     corrCmap = [interp1([0 1], [cBlue; 1 1 1], linspace(0, 1, nC)); ...
@@ -337,6 +374,103 @@ function oct_dashboard()
         render_all_visits_table();
         render_distribution_plot();
         render_corr_matrix();
+        update_wilcoxon();
+    end
+
+    function update_wilcoxon()
+        % OD vs. OS does not depend on the eye selector, only on the ROI mode
+        if isempty(SummaryData), return; end
+        WilcoxT = compute_statistics('wilcoxon', char(ddRoiMode.Value));
+        render_wilcoxon_table();
+    end
+
+    function render_wilcoxon_table()
+        if isempty(WilcoxT), return; end
+        T = WilcoxT;
+        if ~strcmp(ddWilGroup.Value, 'All metrics'), T = T(T.Group == string(ddWilGroup.Value), :); end
+        if ~strcmp(ddWilLayer.Value, 'All'), T = T(T.Layer == string(ddWilLayer.Value), :); end
+        if cbWilSig.Value, T = T(T.p < 0.05, :); end
+        if cbWilFdr.Value, T = T(T.Survives_FDR, :); end
+        WilcoxShown = T;
+
+        FDR = repmat("no", height(T), 1); FDR(T.Survives_FDR) = "yes";
+        tblWilcox.Data = table(T.Side, T.Layer, T.Metric, T.N, T.Median_OD, T.Median_OS, T.Median_Diff, ...
+            T.W, T.p, T.q_FDR, FDR, T.Effect_r, ...
+            'VariableNames', {'Side', 'Layer', 'Metric', 'Pairs', 'Median OD', 'Median OS', ...
+                              'Median diff (OD-OS)', 'W', 'p', 'FDR q', 'Survives FDR', 'Effect r'});
+        removeStyle(tblWilcox);
+        sigRows = find(T.Survives_FDR);
+        if ~isempty(sigRows)
+            addStyle(tblWilcox, uistyle('FontWeight', 'bold'), 'row', sigRows);
+        end
+        lblWilInfo.Text = sprintf(['Showing %d rows  |  %d of %d metrics differ between OD and OS (p < 0.05)  |  ' ...
+            '%d survive FDR (bold)  |  click a row to plot it'], ...
+            height(T), sum(WilcoxT.p < 0.05), height(WilcoxT), sum(WilcoxT.Survives_FDR));
+        if height(T) > 0
+            render_wilcoxon_plot(1);
+        else
+            cla(axWilLeft); cla(axWilRight);
+            title(axWilLeft, 'No metrics match the filter'); title(axWilRight, '');
+        end
+    end
+
+    function on_wilcoxon_row_selected(e)
+        if isempty(e.Indices), return; end
+        if e.Indices(1) <= height(WilcoxShown), render_wilcoxon_plot(e.Indices(1)); end
+    end
+
+    function render_wilcoxon_plot(row)
+        % Same metric and layer for the left and the right ROI, side by side
+        r = WilcoxShown(row, :);
+        colOD = char(r.Column_OD);
+        sides = {'Left', 'Right'};
+        axs = {axWilLeft, axWilRight};
+        v = [];
+        for s = 1:2
+            col = strrep(colOD, ['Median_OD_' char(r.Side) '_'], ['Median_OD_' sides{s} '_']);
+            rs = WilcoxT(WilcoxT.Side == sides{s} & WilcoxT.Layer == r.Layer & WilcoxT.Metric == r.Metric, :);
+            v = [v; draw_paired(axs{s}, col, sprintf('%s %s %s', sides{s}, r.Layer, r.Metric), rs)]; %#ok<AGROW>
+        end
+        % Same y-axis on both plots so left and right can be compared; 15% margin to zoom out
+        if ~isempty(v)
+            pad = 0.15 * max(range(v), abs(mean(v)) * 0.05 + eps);
+            set([axWilLeft axWilRight], 'YLim', [min(v) - pad, max(v) + pad]);
+        end
+    end
+
+    function v = draw_paired(ax, colOD, name, rs)
+        v = [];
+        % Paired plot: one line per visit connecting the OD and OS value
+        cla(ax);
+        colOS = strrep(colOD, 'Median_OD_', 'Median_OS_');
+        if ~ismember(colOD, SummaryData.Properties.VariableNames) || ...
+           ~ismember(colOS, SummaryData.Properties.VariableNames)
+            title(ax, sprintf('%s: no data', name)); return;
+        end
+        x = double(SummaryData.(colOD)); y = double(SummaryData.(colOS));
+        ok = ~isnan(x) & ~isnan(y);
+        if ~any(ok), title(ax, sprintf('%s: no paired visits', name)); return; end
+        medColor = ax.XColor;   % black in light mode, white in dark mode
+        hold(ax, 'on');
+        plot(ax, [1 2], [x(ok) y(ok)]', '-', 'Color', [0.6 0.6 0.6 0.5], 'LineWidth', 1);
+        scatter(ax, ones(sum(ok), 1), x(ok), 50, [0.85 0.3 0.25], 'filled');
+        scatter(ax, 2 * ones(sum(ok), 1), y(ok), 50, [0.3 0.55 0.9], 'filled');
+        plot(ax, [0.75 1.25], median(x(ok)) * [1 1], '-', 'Color', medColor, 'LineWidth', 3.5);
+        plot(ax, [1.75 2.25], median(y(ok)) * [1 1], '-', 'Color', medColor, 'LineWidth', 3.5);
+        hold(ax, 'off');
+        xlim(ax, [0.4 2.6]);
+        v = [x(ok); y(ok)];     % y-limits are set together for both plots by the caller
+        set(ax, 'XTick', [1 2], 'XTickLabel', {'OD (diseased)', 'OS (fellow)'});
+        ylabel(ax, name, 'FontSize', 13);
+        grid(ax, 'on'); box(ax, 'on');
+        if isempty(rs)
+            title(ax, sprintf('%s  |  not tested', name), 'FontWeight', 'bold');
+        else
+            fdrTxt = ''; if rs.Survives_FDR(1), fdrTxt = '  (survives FDR)'; end
+            title(ax, {sprintf('%s ROI %s: %s', rs.Side(1), rs.Layer(1), rs.Metric(1)), ...
+                sprintf('p = %.3g, q = %.3g, n = %d pairs%s', rs.p(1), rs.q_FDR(1), rs.N(1), fdrTxt)}, ...
+                'FontWeight', 'bold');
+        end
     end
 
 function render_distribution_plot()
@@ -864,7 +998,14 @@ function render_distribution_plot()
             plot(axMatrix, [0.5 n + 0.5], [nMorph nMorph] + 0.5, 'k-', 'LineWidth', 2);
         end
 
-        % Mark significant cells: * p < 0.05, ** survives FDR
+        % Minimum |r| detectable with 80% power at alpha = 0.05 for each pair's own n
+        % (inverse of sample_size_corr: N = ((Z_alpha + Z_beta) / atanh(r))^2 + 3)
+        valid = double(~isnan(X));
+        Npair = valid' * valid;
+        Zsum = -norminv(0.05/2) - norminv(0.2);
+        rMin = tanh(Zsum ./ sqrt(max(Npair - 3, eps)));
+
+        % Mark significant cells: * p < 0.05, ** survives FDR, box = also |r| >= rMin
         offDiag = (1:n)' ~= (1:n);
         [ri, ci] = find(P < 0.05 & offDiag);
         for s = 1:numel(ri)
@@ -872,12 +1013,18 @@ function render_distribution_plot()
             if Q(ri(s), ci(s)) < 0.05, mark = '**'; end
             text(axMatrix, ci(s), ri(s), mark, 'HorizontalAlignment', 'center', ...
                  'VerticalAlignment', 'middle', 'FontSize', 9, 'FontWeight', 'bold');
+            if abs(R(ri(s), ci(s))) >= rMin(ri(s), ci(s))
+                rectangle(axMatrix, 'Position', [ci(s) - 0.45, ri(s) - 0.45, 0.9, 0.9], ...
+                          'EdgeColor', [0.7 0.7 0.7], 'LineWidth', 1.5);
+            end
         end
         hold(axMatrix, 'off');
 
+        nVisits = sum(any(~isnan(X), 2));
         title(axMatrix, sprintf('%s | %s | %s', strrep(roi, '_', ' '), eyeSide, method), 'FontWeight', 'bold');
         lblMatInfo.Text = sprintf(['%d visits  |  top-left: morphology + thickness, bottom-right: speckle ' ...
-            'statistics  |  * p < 0.05   ** survives FDR (q < 0.05)'], sum(any(~isnan(X), 2)));
+            'statistics  |  * p < 0.05   ** survives FDR (q < 0.05)   box = also |r| >= %.2f (80%% power, ' ...
+            'n = %d; higher if pair has missing visits)'], nVisits, tanh(Zsum / sqrt(max(nVisits - 3, eps))), nVisits);
     end
 
     function on_signif_row_selected(e)

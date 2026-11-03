@@ -23,11 +23,14 @@ A MATLAB-based image processing, machine learning, and longitudinal clinical ana
   * Computes exact daily rate of change ($\Delta\text{ratio}/\Delta\text{day}$) between consecutive clinical visits.
   * Computes visit aggregates (means and standard deviations across slices).
   * Evaluates Pearson and Spearman clinical correlations between Central Retinal Thickness ($\mu m$) and speckle contrast ratios.
+  * Compares the diseased eye (OD) with the fellow eye (OS) using the Wilcoxon signed-rank test for paired samples (paired by visit), with Benjamini-Hochberg FDR correction over all metrics: `compute_statistics('wilcoxon')` (fixed-width ROIs) or `compute_statistics('wilcoxon', 'legacy')`.
   * Automatically renders publication-grade two-panel figures with clinical status bands (*Active Flare-up*, *Pre-recurrence*, *Remission*).
 * **Interactive MATLAB UI Dashboard (`oct_dashboard.m`):**
   * Desktop application built with MATLAB `uifigure`.
   * Visualizes temporal time-series, dual-axis thickness overlays, and rate-of-change velocity bars.
   * Interactive visit selector, central thickness editor, clinical status badges, and visit creation (e.g. Visit 23+).
+  * **OD vs. OS (Wilcoxon)** tab: filterable table of paired test results (medians, W, p, FDR q, effect size r) and a paired OD/OS plot for the selected metric.
+* **Presentation figures (`presentation/make_presentation_figures.m`):** Exports slide-ready PNGs (fixed-width ROIs) for the results talk to `presentation/figures/`.
 * **Flexible Single & Batch Execution:**
   * Process single folders or batch-process entire directory trees.
   * Features skip/resume capability and reuses the instantiated SAM `MODEL` in memory to maximize processing speed.
