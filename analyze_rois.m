@@ -1,7 +1,9 @@
-function [STATS_Full, STATS_Right, STATS_Left] = analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom)
+function [STATS_Full, STATS_Right, STATS_Left, ROI_Masks] = analyze_rois(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom)
     STATS_Full = [];
     STATS_Right = [];
-    STATS_Left = [];    
+    STATS_Left = [];
+    % ROI masks in the aligned image (used by make_thesis_figures)
+    ROI_Masks = struct('Left', {{}}, 'Right', {{}}, 'Full', {{}});
     
     %% 5 Left-Side ROIs
     if is_hole_found
@@ -81,6 +83,7 @@ function [STATS_Full, STATS_Right, STATS_Left] = analyze_rois(I_crop_orig, I_cro
         
         %% Statistics - Left Side
         masks_left = {Mask_ROI_L1, Mask_ROI_L2, Mask_ROI_L3, Mask_ROI_L4, Mask_ROI_L5};
+        ROI_Masks.Left = masks_left;
         roi_fields = {'L1', 'L2', 'L3', 'L4', 'L5'};
                  
         STATS_Left = struct();
@@ -163,6 +166,7 @@ function [STATS_Full, STATS_Right, STATS_Left] = analyze_rois(I_crop_orig, I_cro
         
         %% Statistics - Right Side
         masks_right = {Mask_ROI_R1, Mask_ROI_R2, Mask_ROI_R3, Mask_ROI_R4, Mask_ROI_R5};
+        ROI_Masks.Right = masks_right;
         roi_fields_right = {'R1', 'R2', 'R3', 'R4', 'R5'};
                  
         STATS_Right = struct();
@@ -254,6 +258,7 @@ function [STATS_Full, STATS_Right, STATS_Left] = analyze_rois(I_crop_orig, I_cro
         
         %% Statistics - Full Width
         masks_full = {Mask_ROI_1, Mask_ROI_2, Mask_ROI_3, Mask_ROI_4, Mask_ROI_5};
+        ROI_Masks.Full = masks_full;
         roi_fields_full = {'Layer1', 'Layer2', 'Layer3', 'Layer4', 'Layer5'};
                  
         STATS_Full = struct();

@@ -1015,7 +1015,7 @@ function render_distribution_plot()
                  'VerticalAlignment', 'middle', 'FontSize', 9, 'FontWeight', 'bold');
             if abs(R(ri(s), ci(s))) >= rMin(ri(s), ci(s))
                 rectangle(axMatrix, 'Position', [ci(s) - 0.45, ri(s) - 0.45, 0.9, 0.9], ...
-                          'EdgeColor', [0.7 0.7 0.7], 'LineWidth', 1.5);
+                          'EdgeColor', [0.4 0.4 0.4], 'LineWidth', 1.5);
             end
         end
         hold(axMatrix, 'off');

@@ -1,4 +1,4 @@
-function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw] = analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom)
+function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw, ROI_Masks] = analyze_rois_fixed_width(I_crop_orig, I_crop_aligned, angle_deg, is_hole_found, Mask_Hole, sy, sx, Layer_Blue1, Layer_Blue2, Layer_Blue3, Layer_Blue4, Layer_Inner_Bot, Layer_RPE_bot, Layer_RPE_top, Layer_ILM, h1, I_true_raw, geom)
     STATS_Full_fw = []; STATS_Right_fw = []; STATS_Left_fw = [];    
     
     % --- FIXED WIDTH PARAMETERS ---
@@ -90,6 +90,8 @@ function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw] = analyze_rois_fixed_wid
     end
     
     masks_right = {Mask_ROI_R1, Mask_ROI_R2, Mask_ROI_R3, Mask_ROI_R4, Mask_ROI_R5};
+    % ROI masks in the aligned image (used by make_thesis_figures)
+    ROI_Masks = struct('Left', {masks_left}, 'Right', {masks_right}, 'Full', {{}});
     roi_fields_right = {'R1', 'R2', 'R3', 'R4', 'R5'};
     STATS_Right_fw = struct();
     for i = 1:5
