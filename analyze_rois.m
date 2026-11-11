@@ -4,6 +4,7 @@ function [STATS_Full, STATS_Right, STATS_Left, ROI_Masks] = analyze_rois(I_crop_
     STATS_Left = [];
     % ROI masks in the aligned image (used by make_thesis_figures)
     ROI_Masks = struct('Left', {{}}, 'Right', {{}}, 'Full', {{}});
+    T_dark = dark_threshold(I_crop_aligned, Layer_ILM); % quality check (fluid-like pixels)
     
     %% 5 Left-Side ROIs
     if is_hole_found
@@ -95,6 +96,7 @@ function [STATS_Full, STATS_Right, STATS_Left, ROI_Masks] = analyze_rois(I_crop_
             if ~isempty(ROI_raw)
                 ROI_transformed = (10.^(ROI_raw/255) - 1) / 9; 
                 STATS_Left.(roi_fields{i}) = speckle_stats(ROI_transformed, ROI_raw);
+                STATS_Left.(roi_fields{i}).DarkFrac = mean(ROI_raw <= T_dark);
             else
                 STATS_Left.(roi_fields{i}) = []; % Assign empty if no pixels
             end
@@ -178,6 +180,7 @@ function [STATS_Full, STATS_Right, STATS_Left, ROI_Masks] = analyze_rois(I_crop_
             if ~isempty(ROI_raw_R)
                 ROI_transformed_R = (10.^(ROI_raw_R/255) - 1) / 9; 
                 STATS_Right.(roi_fields_right{i}) = speckle_stats(ROI_transformed_R, ROI_raw_R);
+                STATS_Right.(roi_fields_right{i}).DarkFrac = mean(ROI_raw_R <= T_dark);
             else
                 STATS_Right.(roi_fields_right{i}) = []; % Assign empty if no pixels are valid
             end
@@ -270,6 +273,7 @@ function [STATS_Full, STATS_Right, STATS_Left, ROI_Masks] = analyze_rois(I_crop_
             if ~isempty(ROI_raw_F)
                 ROI_transformed_F = (10.^(ROI_raw_F/255) - 1) / 9; 
                 STATS_Full.(roi_fields_full{i}) = speckle_stats(ROI_transformed_F, ROI_raw_F);
+                STATS_Full.(roi_fields_full{i}).DarkFrac = mean(ROI_raw_F <= T_dark);
             else
                 STATS_Full.(roi_fields_full{i}) = []; % Assign empty if no pixels are valid
             end

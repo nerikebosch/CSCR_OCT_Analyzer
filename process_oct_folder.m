@@ -11,18 +11,34 @@ function visitNum = process_oct_folder(folderPath, options)
         error('Specified folder does not exist: %s', folderPath);
     end
     [~, folderName, ~] = fileparts(folderPath);
-    fileList = dir(fullfile(folderPath, '*.bmp'));
+    fileList = list_bscans(folderPath);   % sorted by B-scan number (not alphabetically)
     numFiles = length(fileList);
     if numFiles == 0
         error('No .bmp scan files found in: %s', folderPath);
     end
-    
-    if isfield(options, 'targetIndices') && ~isempty(options.targetIndices)
-        targetIndices = options.targetIndices;
-    else
-        targetIndices = [1, 2, numFiles];
+    % B-scan number of every file (the number after 'scan' in the file name)
+    tok = regexp({fileList.name}, 'scan(\d+)\.bmp$', 'tokens', 'once', 'ignorecase');
+    scanNum = cellfun(@(t) str2double(t{1}), tok(~cellfun(@isempty, tok)));
+    if numel(scanNum) ~= numFiles
+        error('Could not read the B-scan number of every file in: %s', folderPath);
     end
-    targetIndices = targetIndices(targetIndices >= 1 & targetIndices <= numFiles);
+
+    % targetIndices = B-scan NUMBERS to process. Default 1, 2 and 32: the three scans
+    % closest to the same meridian. Also used for protocols with more files (e.g. the
+    % 2048x32x5 visit has scan1 ... scan192), where only scans 1, 2 and 32 are taken.
+    if isfield(options, 'targetIndices') && ~isempty(options.targetIndices)
+        targetNums = options.targetIndices;
+    else
+        targetNums = [1, 2, 32];
+    end
+    [found, targetIndices] = ismember(targetNums, scanNum);   % positions in fileList
+    if ~all(found)
+        warning('%s: B-scan(s) %s not found, skipped.', folderName, mat2str(targetNums(~found)));
+    end
+    targetIndices = targetIndices(found);
+    if numFiles ~= 32
+        fprintf('Note: %s has %d B-scans; processing B-scans %s.\n', folderName, numFiles, mat2str(targetNums(found)));
+    end
     
     [extractedDate, extractedEye] = parse_folder_metadata(folderName);
     eyeSide = extractedEye;
@@ -140,6 +156,12 @@ function record = extract_texture_metrics(record, stats_struct, sideName, suffix
             % Original Stats
             record.(sprintf('ROI_%s_L%d%s', sideName, i, suffix)) = st.CR;
             record.(sprintf('ROI_%s_L%d_Densito%s', sideName, i, suffix)) = st.Densito;
+            if isfield(st, 'DarkFrac')   % quality check: fraction of fluid-like pixels
+                record.(sprintf('ROI_%s_L%d_DarkFrac%s', sideName, i, suffix)) = st.DarkFrac;
+            end
+            if isfield(st, 'NCols')      % quality check: ROI width obtained (fixed-width ROIs)
+                record.(sprintf('ROI_%s_L%d_NCols%s', sideName, i, suffix)) = st.NCols;
+            end
             
             % All 8 Distribution Parameters
             record.(sprintf('ROI_%s_L%d_GAM_A%s', sideName, i, suffix)) = st.GAM(1);

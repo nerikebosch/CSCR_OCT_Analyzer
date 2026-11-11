@@ -6,9 +6,9 @@ function M = hole_morphology(Mask_Hole, is_real_hole, I_img, geom, pixel_um)
 %   Mask_Hole    - logical mask of the hole from detect_hole (working image space)
 %   is_real_hole - false if detect_hole found no hole (Mask_Hole is then a virtual strip)
 %   I_img        - image the mask was segmented on (for intensity inside the hole)
-%   geom         - geometry struct from preprocess_OCT (undoes the resize to 992x1536)
-%   pixel_um     - [axial lateral] micrometres per pixel of the ORIGINAL exported image.
-%                  Empty = report in original image pixels (shape features then assume square pixels).
+%   geom         - geometry struct from preprocess_OCT (not used any more; kept for the call signature)
+%   pixel_um     - [axial lateral] micrometres per pixel of the WORKING image (992 x 1536 grid, lateral 5.86 um).
+%                  Empty = report in working-image pixels (same pixel size for every protocol).
 %
 % No hole: size features are 0 (no fluid), shape and intensity features are NaN (undefined).
 
@@ -43,9 +43,12 @@ function M = hole_morphology(Mask_Hole, is_real_hole, I_img, geom, pixel_um)
     M.Hole_MeanIntensity = mean(vals);
     M.Hole_CR = std(vals) / mean(vals);
 
-    % Undo the resize in preprocess_OCT so pixels match the original exported image
-    rows = size(mask, 1) * geom.orig_sy / geom.target_sy;
-    cols = size(mask, 2) * geom.orig_sx / geom.target_sx;
+    % Measure on the working-image grid. preprocess_OCT resamples every exported image to
+    % 992 x 1536 px over the same 9 mm scan, so one working pixel has the same size in all
+    % protocols (lateral 9000/1536 = 5.86 um). The original exports differ in width
+    % (1536, 2048 or more px), so measuring in original pixels would not be comparable.
+    rows = size(mask, 1);
+    cols = size(mask, 2);
     unit = 1; % length of one pixel after resampling
     if ~isempty(pixel_um)
         % Resample to square pixels of lateral size so shape features are not distorted

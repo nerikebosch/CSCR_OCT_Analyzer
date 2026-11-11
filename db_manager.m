@@ -61,7 +61,9 @@ function DB = migrate_fw_and_texture_columns(DB, dbPath)
             for sfx = ["", "_fw"]
                 requiredCols{end+1} = sprintf('ROI_%s_L%d%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_Densito%s', side, L, sfx);
-                
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_DarkFrac%s', side, L, sfx); % quality checks
+                requiredCols{end+1} = sprintf('ROI_%s_L%d_NCols%s', side, L, sfx);
+
                 % All Parameters
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_A%s', side, L, sfx);
                 requiredCols{end+1} = sprintf('ROI_%s_L%d_GAM_B%s', side, L, sfx);

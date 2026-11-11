@@ -32,71 +32,83 @@ function [is_hole_found, Mask_Hole, MaxPH, indMaxPH, is_real_hole] = detect_hole
     h2 = figure; imagesc(labels); 
     title("Labels of the stretched image")
     
-    Bw2 = imclose(Bw2, strel('disk', 1));
-    BW2filled = imfill(Bw2,'holes');
-    
-    % Create U-masks
-    UmaskL = zeros(sy_stretch, sx);
-    UmaskL(:,[1 end]) = 1;
-    UmaskL(end,:) = 1;
-    
-    UmaskU = zeros(sy_stretch, sx);
-    UmaskU(:,[1 end]) = 1;
-    UmaskU(1,:) = 1;
-    
-    BW2L = ~imfill(or(BW2filled,UmaskL),'holes');
-    BW2U = ~imfill(or(BW2filled,UmaskU),'holes');
-    BW2LU = or(BW2L,BW2U);
-    Bw3 = ~or(Bw2,BW2LU);
-    
-    % clean the Umasks
-    Bw3(1,:) = 0;
-    Bw3(end,:) = 0;
-    Bw3(:,1) = 0;
-    Bw3(:,end) = 0;
-    
-    Bw3 = imopen(Bw3, strel('disk', 4));
-    
-    % check whether the potential hole is on the sides of the picture
-    left_margin = round(sx * 0.35);
-    right_margin = round(sx * 0.25);
-    Bw3(:, 1:left_margin) = 0; 
-    Bw3(:, end-right_margin:end) = 0;
-    
-    h4 = figure; imagesc(Bw3); colormap gray;
-    title("Stretched Image after using imopen")
-    
-    % Check for holes using the stretched region properties
-    stats = regionprops(logical(Bw3), 'Area', 'Centroid', 'BoundingBox', 'PixelIdxList', 'Solidity');
-    
-    is_hole_found = false;
-    target_hole_idx = [];
-    max_area = 0;
-    
-    for k = 1:length(stats)
-        if stats(k).Area > 500 * stretch_factor 
-            
-            % Check intensity
-            pixel_indices = stats(k).PixelIdxList;
-            label1_count = sum(labels(pixel_indices) == 1);
-            dark_ratio = label1_count / stats(k).Area;
-            
-            % Check the shape
-            bbox = stats(k).BoundingBox; 
-            width = bbox(3);
-            height = bbox(4);
-            is_not_thin  = (height / width) < 4.0;
-            is_solid = stats(k).Solidity > 0.30;
-            
-            if dark_ratio > 0.20 && is_not_thin && is_solid
-                if stats(k).Area > max_area
-                    max_area = stats(k).Area;
-                    target_hole_idx = k;
-                    is_hole_found = true;
+    % The fluid pocket lies near the fovea, so a candidate is only accepted when its
+    % centroid is between 35 % and 75 % of the width (dark regions at the sides are
+    % ignored). The side columns are NOT erased: erasing them cut the bounding box
+    % given to SAM, so pockets reaching past these limits were segmented too small.
+    centre_lo = round(sx * 0.35);
+    centre_hi = sx - round(sx * 0.25);
+
+    % Attempt 1: closing radius 1, dark ratio > 0.20 (original settings).
+    % Attempt 2, only if nothing was found: closing radius 3 seals small gaps in the
+    % tissue boundary through which a pocket can leak into the background; it needs a
+    % stricter dark ratio (> 0.50) so the darker foveal centre of a dry eye is not taken.
+    attempts = [1 0.20; 3 0.50];
+    Bw2_tissue = Bw2;
+    for a = 1:size(attempts, 1)
+        Bw2 = imclose(Bw2_tissue, strel('disk', attempts(a, 1)));
+        min_dark = attempts(a, 2);
+        BW2filled = imfill(Bw2,'holes');
+
+        % Create U-masks
+        UmaskL = zeros(sy_stretch, sx);
+        UmaskL(:,[1 end]) = 1;
+        UmaskL(end,:) = 1;
+
+        UmaskU = zeros(sy_stretch, sx);
+        UmaskU(:,[1 end]) = 1;
+        UmaskU(1,:) = 1;
+
+        BW2L = ~imfill(or(BW2filled,UmaskL),'holes');
+        BW2U = ~imfill(or(BW2filled,UmaskU),'holes');
+        BW2LU = or(BW2L,BW2U);
+        Bw3 = ~or(Bw2,BW2LU);
+
+        % clean the Umasks
+        Bw3(1,:) = 0;
+        Bw3(end,:) = 0;
+        Bw3(:,1) = 0;
+        Bw3(:,end) = 0;
+
+        Bw3 = imopen(Bw3, strel('disk', 4));
+
+        % Check for holes using the stretched region properties
+        stats = regionprops(logical(Bw3), 'Area', 'Centroid', 'BoundingBox', 'PixelIdxList', 'Solidity');
+
+        is_hole_found = false;
+        target_hole_idx = [];
+        max_area = 0;
+
+        for k = 1:length(stats)
+            if stats(k).Area > 500 * stretch_factor
+
+                % Check intensity
+                pixel_indices = stats(k).PixelIdxList;
+                label1_count = sum(labels(pixel_indices) == 1);
+                dark_ratio = label1_count / stats(k).Area;
+
+                % Check the shape
+                bbox = stats(k).BoundingBox;
+                width = bbox(3);
+                height = bbox(4);
+                is_not_thin  = (height / width) < 4.0;
+                is_solid = stats(k).Solidity > 0.30;
+                in_centre = stats(k).Centroid(1) >= centre_lo && stats(k).Centroid(1) <= centre_hi;
+
+                if dark_ratio > min_dark && is_not_thin && is_solid && in_centre
+                    if stats(k).Area > max_area
+                        max_area = stats(k).Area;
+                        target_hole_idx = k;
+                        is_hole_found = true;
+                    end
                 end
             end
         end
+        if is_hole_found, break; end
     end
+
+    h4 = figure; imagesc(Bw3); colormap gray;
+    title("Stretched Image after using imopen")
     
     % Remember whether a real hole was found (is_hole_found is forced true below if not)
     is_real_hole = is_hole_found;
@@ -123,8 +135,13 @@ function [is_hole_found, Mask_Hole, MaxPH, indMaxPH, is_real_hole] = detect_hole
         Mask_Hole_stretch = segmentObjectsFromEmbeddings(MODEL, embeddings_stretch, [sy_stretch, sx], ...
             "BoundingBox", bbox_stretch); 
     
+        % SAM often misses the thin tapering ends of the pocket. Add the detected
+        % candidate itself (a dark region fully enclosed by tissue) to the SAM mask.
+        Cand_stretch = false(sy_stretch, sx);
+        Cand_stretch(target_hole.PixelIdxList) = true;
+        Mask_Hole_stretch = imfill(Mask_Hole_stretch | Cand_stretch, 'holes');
         Mask_Hole_stretch = bwareafilt(Mask_Hole_stretch, 1);
-        
+
         % resize the mask to original size
         Mask_Hole = imresize(Mask_Hole_stretch, [sy, sx], 'nearest');
         

@@ -74,6 +74,12 @@ function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw, ROI_Masks] = analyze_roi
     hold off;
 
     %% Calculate Statistics
+    % Quality checks: DarkFrac = fraction of ROI pixels no brighter than the vitreous
+    % (fluid-like pixels), NCols = ROI width actually obtained (< 120 at the image edge).
+    T_dark = dark_threshold(I_crop_aligned, Layer_ILM);
+    nCols_left  = x_left_end - x_left_start + 1;
+    nCols_right = max(0, x_right_end - x_right_start + 1);
+
     masks_left = {Mask_ROI_L1, Mask_ROI_L2, Mask_ROI_L3, Mask_ROI_L4, Mask_ROI_L5};
     roi_fields = {'L1', 'L2', 'L3', 'L4', 'L5'};
     STATS_Left_fw = struct();
@@ -84,6 +90,8 @@ function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw, ROI_Masks] = analyze_roi
         if ~isempty(ROI_raw)
             ROI_transformed = (10.^(ROI_raw/255) - 1) / 9; 
             STATS_Left_fw.(roi_fields{i}) = speckle_stats(ROI_transformed, ROI_raw);
+            STATS_Left_fw.(roi_fields{i}).DarkFrac = mean(ROI_raw <= T_dark);
+            STATS_Left_fw.(roi_fields{i}).NCols = nCols_left;
         else
             STATS_Left_fw.(roi_fields{i}) = []; 
         end
@@ -101,6 +109,8 @@ function [STATS_Full_fw, STATS_Right_fw, STATS_Left_fw, ROI_Masks] = analyze_roi
         if ~isempty(ROI_raw_R)
             ROI_transformed_R = (10.^(ROI_raw_R/255) - 1) / 9; 
             STATS_Right_fw.(roi_fields_right{i}) = speckle_stats(ROI_transformed_R, ROI_raw_R);
+            STATS_Right_fw.(roi_fields_right{i}).DarkFrac = mean(ROI_raw_R <= T_dark);
+            STATS_Right_fw.(roi_fields_right{i}).NCols = nCols_right;
         else
             STATS_Right_fw.(roi_fields_right{i}) = []; 
         end
