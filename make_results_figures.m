@@ -17,7 +17,9 @@ function make_results_figures(options)
 %                                   OD and OS over the follow-up in the same panel
 %     res_od_os_effects             Wilcoxon OD vs OS for every metric and ROI: signed effect size r,
 %                                   * p < 0.05, ** survives FDR
-%     res_paired_CR / _Densito / _ratios   paired OD-OS values per visit for each ROI
+%     res_paired_CR / _Densito / _NK_mu / _ratios   paired OD-OS values per visit for each ROI
+%     res_od_os_summary             compact version of res_od_os_effects: CR, Nakagami m and densitometry
+%                                   per layer (plus CR ratios), signed r printed in each cell
 %   3.2 Distribution fitting
 %     res_bestfit                   rank of the 8 distributions per ROI (median GoF), OD | OS
 %   3.3 Clinical correlations
@@ -61,6 +63,8 @@ function make_results_figures(options)
              @() fig_effects(W, C), ...
              @() fig_paired(S, W, C, 'CR'), ...
              @() fig_paired(S, W, C, 'Densito'), ...
+             @() fig_paired(S, W, C, 'NK_mu'), ...
+             @() fig_summary(W, C), ...
              @() fig_paired_ratios(S, W, C), ...
              @() fig_bestfit(S, C), ...
              @() fig_corr_overview(S, C), ...
@@ -225,6 +229,59 @@ function fig_effects(W, C)
     save_fig(f, C, 'res_od_os_effects');
 end
 
+
+%% Compact summary: layers (rows) x {CR, Nakagami m, densitometry} per ROI side (columns),
+%  signed effect size r printed in each cell, ** = survives FDR, * = p < 0.05 only
+function fig_summary(W, C)
+    rows = {'L1', 'L2', 'L3', 'L4', 'L5', 'L3/L4', 'L4/L5'};
+    mets = {'CR', 'Nakagami mu', 'Densitometry'};
+    mLab = {'CR', 'Nakagami m', 'Densito.'};
+    sides = {'Left', 'Right'};
+    nR = numel(rows); nM = numel(mets);
+    E = nan(nR, 2 * nM); P = E; Q = E;
+    for s = 1:2
+        for m = 1:nM
+            for r = 1:nR
+                met = mets{m};
+                if r > 5
+                    if m ~= 1, continue; end
+                    met = ['CR ratio ' rows{r}];
+                end
+                k = find(W.Side == sides{s} & W.Layer == rows{r} & W.Metric == met, 1);
+                if isempty(k), continue; end
+                c = (s - 1) * nM + m;
+                E(r, c) = sign(W.Median_Diff(k)) * W.Effect_r(k);
+                P(r, c) = W.p(k); Q(r, c) = W.q_FDR(k);
+            end
+        end
+    end
+    f = newfig(16, 9.5);
+    ax = axes(f); hold(ax, 'on');
+    imagesc(ax, E, 'AlphaData', ~isnan(E)); set(ax, 'Color', [0.92 0.92 0.92], 'YDir', 'reverse');
+    colormap(ax, C.cmap); clim(ax, [-1 1]);
+    for r = 1:nR
+        for c = 1:2 * nM
+            if isnan(E(r, c)), continue; end
+            mk = ''; if P(r, c) < 0.05, mk = '*'; end; if Q(r, c) < 0.05, mk = '**'; end
+            tc = 'k'; if abs(E(r, c)) > 0.65, tc = 'w'; end
+            fw = 'normal'; if Q(r, c) < 0.05, fw = 'bold'; end
+            text(ax, c, r, sprintf('%+.2f%s', E(r, c), mk), 'HorizontalAlignment', 'center', ...
+                 'FontSize', 7, 'FontWeight', fw, 'Color', tc);
+        end
+    end
+    plot(ax, (nM + 0.5) * [1 1], [0.5 nR + 0.5], 'k-', 'LineWidth', 1.5);   % Left | Right ROI
+    plot(ax, [0.5 2 * nM + 0.5], [5.5 5.5], 'k-', 'LineWidth', 1);          % layers | CR ratios
+    xlim(ax, [0.5 2 * nM + 0.5]); ylim(ax, [0.5 nR + 0.5]);
+    rl = rows; rl(6:7) = {'CR L3/L4', 'CR L4/L5'};
+    set(ax, 'XTick', 1:2 * nM, 'XTickLabel', [mLab mLab], 'YTick', 1:nR, 'YTickLabel', rl, ...
+        'TickLength', [0 0], 'FontSize', 7, 'XColor', 'k', 'YColor', 'k', 'XAxisLocation', 'top');
+    box(ax, 'on');
+    text(ax, (nM + 1) / 2, nR + 0.95, 'Left ROI', 'HorizontalAlignment', 'center', 'FontSize', 8);
+    text(ax, nM + (nM + 1) / 2, nR + 0.95, 'Right ROI', 'HorizontalAlignment', 'center', 'FontSize', 8);
+    cb = colorbar(ax); cb.Label.String = 'signed effect size r (red: OD > OS, blue: OD < OS)'; cb.FontSize = 7;
+    save_fig(f, C, 'res_od_os_summary');
+end
+
 %% Paired OD-OS values per visit: rows = ROI side, columns = layer
 function fig_paired(S, W, C, metric)
     [mName, yLab] = metric_label(metric);
@@ -248,7 +305,7 @@ function fig_paired(S, W, C, metric)
             mark_clipped(axs(L), 2 * ones(height(S), 1), vals{L, 2}, C.OS);
         end
     end
-    title(tl, sprintf('%s, OD vs OS per visit (lines connect the same visit), %s', mName, C.modeName), 'FontSize', 9);
+    title(tl, sprintf('%s, OD vs OS per visit (lines connect the same visit), %s', strtok(yLab, '('), C.modeName), 'FontSize', 9);
     save_fig(f, C, sprintf('res_paired_%s', metric));
 end
 
@@ -508,13 +565,13 @@ function mark_clipped(ax, x, y, col)
     yl = ylim(ax);
     hi = y > yl(2); lo = y < yl(1);
     if any(hi)
-        plot(ax, x(hi), repmat(yl(2), sum(hi), 1), '^', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
-        text(ax, x(hi), repmat(yl(2), sum(hi), 1), compose(' %.2f', y(hi)), 'FontSize', 6, ...
+        plot(ax, x(hi), repmat(yl(2) - 0.03 * diff(yl), sum(hi), 1), '^', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
+        text(ax, x(hi), repmat(yl(2) - 0.03 * diff(yl), sum(hi), 1), compose(' %.2f', y(hi)), 'FontSize', 6, ...
              'VerticalAlignment', 'top', 'Color', 'k');
     end
     if any(lo)
-        plot(ax, x(lo), repmat(yl(1), sum(lo), 1), 'v', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
-        text(ax, x(lo), repmat(yl(1), sum(lo), 1), compose(' %.2f', y(lo)), 'FontSize', 6, ...
+        plot(ax, x(lo), repmat(yl(1) + 0.03 * diff(yl), sum(lo), 1), 'v', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
+        text(ax, x(lo), repmat(yl(1) + 0.03 * diff(yl), sum(lo), 1), compose(' %.2f', y(lo)), 'FontSize', 6, ...
              'VerticalAlignment', 'bottom', 'Color', 'k');
     end
 end

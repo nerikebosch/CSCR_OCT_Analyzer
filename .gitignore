@@ -10,6 +10,9 @@
 scans/
 data/
 output/
+figs/
+figures/
+presentation/
 
 # Databases & Spreadsheets (Contains patient dates, thicknesses, notes, metrics)
 *.mat
