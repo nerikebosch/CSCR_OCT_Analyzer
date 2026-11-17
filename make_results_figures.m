@@ -8,7 +8,8 @@ function make_results_figures(options)
 %       DetailLayers - layers that get their own correlation page, default [4 5]
 %       OutDir       - output folder, default 'figs/results'
 %
-%   Every figure is sized for an A4 text width (16-17 cm) and saved as .png (300 dpi) and .pdf (vector).
+%   Every figure is 14.5 cm wide (the A4 text width; include with width=\textwidth), uses the thesis font
+%   size (thesis_style) and is saved as .png (300 dpi) and .pdf (vector). OD is always left of OS.
 %
 %   3.1 Temporal evolution
 %     res_morphology                OD fluid area / height / width / shape over the follow-up
@@ -17,15 +18,16 @@ function make_results_figures(options)
 %                                   OD and OS over the follow-up in the same panel
 %     res_od_os_effects             Wilcoxon OD vs OS for every metric and ROI: signed effect size r,
 %                                   * p < 0.05, ** survives FDR
-%     res_paired_CR / _Densito / _NK_mu / _ratios   paired OD-OS values per visit for each ROI
-%     res_od_os_summary             compact version of res_od_os_effects: CR, Nakagami m and densitometry
-%                                   per layer (plus CR ratios), signed r printed in each cell
+%     res_paired_CR / _Densito / _NK_mu / _NK_om / _GAM_A / _GAM_B / _ratios
+%                                   paired OD-OS values per visit for each ROI
+%     res_od_os_summary             (a) Left and (b) Right ROI: CR, Nakagami m and Omega, Gamma a and b,
+%                                   densitometry per layer (plus CR ratios), signed r in each cell
 %   3.2 Distribution fitting
 %     res_bestfit                   rank of the 8 distributions per ROI (median GoF), OD | OS
 %   3.3 Clinical correlations
 %     res_corr_overview_Right/Left  5 rows (L1-L5) x 2 columns (OD | OS), one page per ROI side
-%     res_corr_L4, res_corr_L5      one page per layer: OD | OS, Right ROI (top) and Left ROI (bottom),
-%                                   with readable labels
+%     res_corr_L4, res_corr_L5      one page per layer: OD | OS, Right ROI (top) and Left ROI (bottom);
+%                                   texture (rows) vs CRT and fluid morphology (columns)
 %     res_clinical                  Spearman rho of CR / densitometry with central thickness and fluid area
 
     if nargin < 1, options = struct(); end
@@ -45,7 +47,9 @@ function make_results_figures(options)
     C = struct();
     C.sfx = ''; if strcmpi(options.RoiMode, 'fw'), C.sfx = '_fw'; end
     C.modeName = 'fixed-width ROIs'; if isempty(C.sfx), C.modeName = 'full-extent ROIs'; end
-    C.OD = [0.80 0.25 0.20]; C.OS = [0.20 0.40 0.75];
+    ST = thesis_style();
+    C.OD = ST.OD; C.OS = ST.OS;
+    C.W = ST.width; C.fs = ST.fs; C.fsSmall = ST.fsSmall;   % all figures 14.5 cm wide (\textwidth)
     nC = 128;
     C.cmap = [interp1([0 1], [C.OS; 1 1 1], linspace(0, 1, nC)); ...
               interp1([0 1], [1 1 1; C.OD], linspace(0, 1, nC))];
@@ -64,6 +68,9 @@ function make_results_figures(options)
              @() fig_paired(S, W, C, 'CR'), ...
              @() fig_paired(S, W, C, 'Densito'), ...
              @() fig_paired(S, W, C, 'NK_mu'), ...
+             @() fig_paired(S, W, C, 'NK_om'), ...
+             @() fig_paired(S, W, C, 'GAM_A'), ...
+             @() fig_paired(S, W, C, 'GAM_B'), ...
              @() fig_summary(W, C), ...
              @() fig_paired_ratios(S, W, C), ...
              @() fig_bestfit(S, C), ...
@@ -85,7 +92,7 @@ end
 %  ========================================================================
 function fig_timecourse(S, W, C, metric)
     [mName, yLab] = metric_label(metric);
-    f = newfig(17, 24);
+    f = newfig(C.W, 21);
     tl = tiledlayout(f, 6, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 
     % Central thickness spans both columns: clinical context for the rows below
@@ -106,8 +113,7 @@ function fig_timecourse(S, W, C, metric)
             plot(ax, C.days, od, '-o', 'Color', C.OD, 'MarkerFaceColor', C.OD, 'MarkerSize', 2.5, 'LineWidth', 1);
             plot(ax, C.days, os, '-s', 'Color', C.OS, 'MarkerFaceColor', C.OS, 'MarkerSize', 2.5, 'LineWidth', 1);
             style_ax(ax); xlim(ax, [-10, max(C.days) + 10]);
-            title(ax, sprintf('(%c) %s ROI, L%d   %s', letter, sides{s}, L, wil_tag(W, sides{s}, sprintf('L%d', L), mName)), ...
-                  'FontWeight', 'normal');
+            title(ax, sprintf('(%c) %s L%d ROI   %s', letter, sides{s}, L, wil_tag(W, sides{s}, sprintf('L%d', L), mName)));
             letter = letter + 1;
             if s == 1, ylabel(ax, yLab); end
             if L == 5, xlabel(ax, 'Days since first visit'); else, ax.XTickLabel = {}; end
@@ -126,8 +132,9 @@ end
 %% Fluid pocket over the follow-up (OD), with central thickness for reference
 function fig_morphology(S, C)
     found = col(S, 'Median_OD_Hole_Found') >= 0.5;    % fluid in at least 2 of the 3 B-scans
-    f = newfig(17, 15);
-    tl = tiledlayout(f, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    % open markers: fluid detected in fewer than 2 of the 3 B-scans (say so in the caption)
+    f = newfig(C.W, 13);
+    tl = tiledlayout(f, 3, 1, 'TileSpacing', 'tight', 'Padding', 'compact');
 
     ax = nexttile(tl); hold(ax, 'on');
     yyaxis(ax, 'left');
@@ -139,8 +146,7 @@ function fig_morphology(S, C)
     plot(ax, C.days, S.CentralThickness_OD, '--s', 'Color', [0.3 0.3 0.3], 'MarkerSize', 3, 'LineWidth', 1);
     ylabel(ax, 'CRT OD (\mum)'); ax.YColor = [0.3 0.3 0.3];
     [r, p] = rho(a, col(S, 'CentralThickness_OD'), C.method);
-    title(ax, sprintf('(a) Fluid area and central thickness (%s \\rho = %.2f, p %s)', C.method, r, fmt_p(p)), ...
-          'FontWeight', 'normal');
+    title(ax, sprintf('(a) Fluid area and CRT (%s \\rho = %.2f, p %s)', C.method, r, fmt_p(p)));
     style_ax(ax); ax.XTickLabel = {};
 
     ax = nexttile(tl); hold(ax, 'on');
@@ -158,7 +164,6 @@ function fig_morphology(S, C)
     title(ax, '(c) Fluid shape', 'FontWeight', 'normal');
     style_ax(ax); xlabel(ax, 'Days since first visit');
     set(findall(f, 'Type', 'axes'), 'XLim', [-10, max(C.days) + 10]);
-    subtitle(tl, 'Median of the 3 B-scans per visit. Open markers: fluid detected in fewer than 2 of 3 B-scans.', 'FontSize', 7);
     save_fig(f, C, 'res_morphology');
 end
 
@@ -184,13 +189,13 @@ function table_wilcoxon(W, C)
     fprintf('Saved %s\n', fullfile(C.out, 'res_wilcoxon_table.tex'));
 end
 
-%% OD vs OS: signed effect size for every metric and ROI
+%% OD vs OS: signed effect size for every metric and ROI (all 18 parameters, for the appendix)
 function fig_effects(W, C)
     [rowNames, ~] = metric_rows();
     nR = numel(rowNames);
     sides = {'Left', 'Right'};
-    f = newfig(17, 13);
-    tl = tiledlayout(f, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    f = newfig(C.W, 15);
+    tl = tiledlayout(f, 1, 2, 'TileSpacing', 'tight', 'Padding', 'compact');
     for s = 1:2
         E = nan(nR, 5); Pm = nan(nR, 5); Qm = nan(nR, 5);
         for r = 1:nR
@@ -212,34 +217,35 @@ function fig_effects(W, C)
                 if Pm(r, L) < 0.05
                     mk = '*'; if Qm(r, L) < 0.05, mk = '**'; end
                     text(ax, L, r, mk, 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
-                         'FontSize', 7, 'FontWeight', 'bold', 'Color', 'k');
+                         'FontSize', C.fsSmall, 'FontWeight', 'bold', 'Color', 'k');
                 end
             end
         end
         set(ax, 'XTick', 1:5, 'XTickLabel', compose('L%d', 1:5), 'YTick', 1:nR, 'TickLength', [0 0], ...
-            'FontSize', 7, 'XColor', 'k', 'YColor', 'k', 'TickLabelInterpreter', 'none');
+            'TickLabelInterpreter', 'none');
         if s == 1, set(ax, 'YTickLabel', rowNames); else, set(ax, 'YTickLabel', {}); end
-        title(ax, sprintf('(%c) %s ROI', 'a' + s - 1, sides{s}), 'FontWeight', 'normal');
+        title(ax, sprintf('(%c) %s ROI', 'a' + s - 1, sides{s}));
         box(ax, 'on');
     end
     cb = colorbar(ax); cb.Layout.Tile = 'east';
-    cb.Label.String = 'signed effect size r  (red: OD > OS, blue: OD < OS)';
-    title(tl, sprintf('OD vs OS, Wilcoxon signed-rank (paired by visit), %s', C.modeName), 'FontSize', 9);
-    subtitle(tl, '* p < 0.05   ** q < 0.05 (Benjamini-Hochberg over all tests)', 'FontSize', 7);
+    cb.Label.String = 'signed effect size r (red: OD > OS, blue: OD < OS)';
     save_fig(f, C, 'res_od_os_effects');
 end
 
-
-%% Compact summary: layers (rows) x {CR, Nakagami m, densitometry} per ROI side (columns),
-%  signed effect size r printed in each cell, ** = survives FDR, * = p < 0.05 only
+%% Summary per layer: rows = layers (+ CR ratios), columns = CR, Nakagami m and Omega, Gamma a and b,
+%  densitometry; (a) Left ROI on top, (b) Right ROI below. Signed effect size r in each cell,
+%  ** survives FDR, * p < 0.05 only.
 function fig_summary(W, C)
     rows = {'L1', 'L2', 'L3', 'L4', 'L5', 'L3/L4', 'L4/L5'};
-    mets = {'CR', 'Nakagami mu', 'Densitometry'};
-    mLab = {'CR', 'Nakagami m', 'Densito.'};
+    mets = {'CR', 'Nakagami mu', 'Nakagami om', 'Gamma A', 'Gamma B', 'Densitometry'};
+    % column headers on two lines (drawn as text: tick labels cannot have two lines)
+    mLab = {{'CR', ''}, {'Nakagami', 'm'}, {'Nakagami', char(937)}, {'Gamma', 'a'}, {'Gamma', 'b'}, {'Densito-', 'metry'}};
     sides = {'Left', 'Right'};
     nR = numel(rows); nM = numel(mets);
-    E = nan(nR, 2 * nM); P = E; Q = E;
+    f = newfig(C.W, 14);
+    tl = tiledlayout(f, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     for s = 1:2
+        E = nan(nR, nM); P = E; Q = E;
         for m = 1:nM
             for r = 1:nR
                 met = mets{m};
@@ -249,36 +255,49 @@ function fig_summary(W, C)
                 end
                 k = find(W.Side == sides{s} & W.Layer == rows{r} & W.Metric == met, 1);
                 if isempty(k), continue; end
-                c = (s - 1) * nM + m;
-                E(r, c) = sign(W.Median_Diff(k)) * W.Effect_r(k);
-                P(r, c) = W.p(k); Q(r, c) = W.q_FDR(k);
+                E(r, m) = sign(W.Median_Diff(k)) * W.Effect_r(k);
+                P(r, m) = W.p(k); Q(r, m) = W.q_FDR(k);
             end
         end
+        ax = nexttile(tl); hold(ax, 'on');
+        imagesc(ax, E, 'AlphaData', ~isnan(E)); set(ax, 'Color', [0.92 0.92 0.92], 'YDir', 'reverse');
+        colormap(ax, C.cmap); clim(ax, [-1 1]);
+        for r = 1:nR
+            for c = 1:nM
+                if isnan(E(r, c)), continue; end
+                mk = ''; if P(r, c) < 0.05, mk = '*'; end; if Q(r, c) < 0.05, mk = '**'; end
+                tc = 'k'; if abs(E(r, c)) > 0.65, tc = 'w'; end
+                fw = 'normal'; if Q(r, c) < 0.05, fw = 'bold'; end
+                text(ax, c, r, sprintf('%+.2f%s', E(r, c), mk), 'HorizontalAlignment', 'center', ...
+                     'FontSize', C.fsSmall, 'FontWeight', fw, 'Color', tc);
+            end
+        end
+        plot(ax, [0.5 nM + 0.5], [5.5 5.5], 'k-', 'LineWidth', 1);          % layers | CR ratios
+        plot(ax, [5.5 5.5], [0.5 nR + 0.5], 'k-', 'LineWidth', 0.8);        % texture | densitometry
+        xlim(ax, [0.5 nM + 0.5]); ylim(ax, [0.5 nR + 0.5]);
+        rl = rows; rl(6:7) = {'CR L3/L4', 'CR L4/L5'};
+        set(ax, 'XTick', [], 'YTick', 1:nR, 'YTickLabel', rl, 'TickLength', [0 0]);
+        if s == 1
+            title(ax, {' ', ' '});   % reserves two lines above the panel for the headers
+            hdrAx = ax;
+        end
+        ylabel(ax, sprintf('(%c) %s ROI', 'a' + s - 1, sides{s}));
+        box(ax, 'on');
     end
-    f = newfig(16, 9.5);
-    ax = axes(f); hold(ax, 'on');
-    imagesc(ax, E, 'AlphaData', ~isnan(E)); set(ax, 'Color', [0.92 0.92 0.92], 'YDir', 'reverse');
-    colormap(ax, C.cmap); clim(ax, [-1 1]);
-    for r = 1:nR
-        for c = 1:2 * nM
-            if isnan(E(r, c)), continue; end
-            mk = ''; if P(r, c) < 0.05, mk = '*'; end; if Q(r, c) < 0.05, mk = '**'; end
-            tc = 'k'; if abs(E(r, c)) > 0.65, tc = 'w'; end
-            fw = 'normal'; if Q(r, c) < 0.05, fw = 'bold'; end
-            text(ax, c, r, sprintf('%+.2f%s', E(r, c), mk), 'HorizontalAlignment', 'center', ...
-                 'FontSize', 7, 'FontWeight', fw, 'Color', tc);
+    cb = colorbar(ax); cb.Layout.Tile = 'south'; cb.Ticks = -1:0.5:1;
+    cb.Label.String = 'signed effect size r (red: OD > OS, blue: OD < OS)';
+    % Column headers: each line is its own text on a common baseline, so a symbol such as
+    % \Omega cannot shift one header up. One text line in data units comes from the final
+    % axes height (fonts set first so the layout is final).
+    thesis_style(f, 'finish'); drawnow;
+    hdrAx.Units = 'points'; hPt = hdrAx.InnerPosition(4); hdrAx.Units = 'normalized';
+    dy = nR / hPt * 1.25 * C.fs;
+    for c = 1:nM
+        for ln = 1:2
+            text(hdrAx, c, 0.5 - (2.25 - ln) * dy, mLab{c}{ln}, 'HorizontalAlignment', 'center', ...
+                 'VerticalAlignment', 'baseline', 'FontSize', C.fs, 'Clipping', 'off', 'Interpreter', 'none');   % plain Unicode Omega: same font and baseline as the others
         end
     end
-    plot(ax, (nM + 0.5) * [1 1], [0.5 nR + 0.5], 'k-', 'LineWidth', 1.5);   % Left | Right ROI
-    plot(ax, [0.5 2 * nM + 0.5], [5.5 5.5], 'k-', 'LineWidth', 1);          % layers | CR ratios
-    xlim(ax, [0.5 2 * nM + 0.5]); ylim(ax, [0.5 nR + 0.5]);
-    rl = rows; rl(6:7) = {'CR L3/L4', 'CR L4/L5'};
-    set(ax, 'XTick', 1:2 * nM, 'XTickLabel', [mLab mLab], 'YTick', 1:nR, 'YTickLabel', rl, ...
-        'TickLength', [0 0], 'FontSize', 7, 'XColor', 'k', 'YColor', 'k', 'XAxisLocation', 'top');
-    box(ax, 'on');
-    text(ax, (nM + 1) / 2, nR + 0.95, 'Left ROI', 'HorizontalAlignment', 'center', 'FontSize', 8);
-    text(ax, nM + (nM + 1) / 2, nR + 0.95, 'Right ROI', 'HorizontalAlignment', 'center', 'FontSize', 8);
-    cb = colorbar(ax); cb.Label.String = 'signed effect size r (red: OD > OS, blue: OD < OS)'; cb.FontSize = 7;
     save_fig(f, C, 'res_od_os_summary');
 end
 
@@ -286,45 +305,58 @@ end
 function fig_paired(S, W, C, metric)
     [mName, yLab] = metric_label(metric);
     sides = {'Left', 'Right'};
-    f = newfig(17, 11);
-    tl = tiledlayout(f, 2, 5, 'TileSpacing', 'compact', 'Padding', 'compact');
+    f = newfig(C.W, 11.5);
+    % one inner layout per ROI side, so the gap between the Left and Right rows can be wider
+    % than the gap between the layers
+    outer = tiledlayout(f, 2, 1, 'TileSpacing', 'loose', 'Padding', 'compact');
     for s = 1:2
+        tl = tiledlayout(outer, 1, 5, 'TileSpacing', 'compact', 'Padding', 'tight');
+        tl.Layout.Tile = s;
         axs = gobjects(1, 5); vals = cell(5, 2);
         for L = 1:5
             ax = nexttile(tl); axs(L) = ax;
             [od, os] = od_os(S, sides{s}, L, metric, C.sfx);
             paired_panel(ax, od, os, C);
             vals(L, :) = {od, os};
-            title(ax, {sprintf('%s L%d', sides{s}, L), wil_tag(W, sides{s}, sprintf('L%d', L), mName)}, ...
-                  'FontWeight', 'normal', 'FontSize', 7);
-            if L == 1, ylabel(ax, yLab); end
+            title(ax, {sprintf('%s L%d ROI', sides{s}, L), wil_tag(W, sides{s}, sprintf('L%d', L), mName)});
+            if L == 1, ylabel(ax, yLab); else, ax.YTickLabel = {}; end   % same y-scale along the row
         end
-        set(axs, 'YLim', robust_lim(vertcat(vals{:})));   % one scale per row
+        % one scale per row: the union of each layer's own robust range, so a layer with much
+        % larger values (e.g. L5) is not treated as outliers of the other layers
+        lims = zeros(5, 2);
+        for L = 1:5, lims(L, :) = robust_lim([vals{L, 1}; vals{L, 2}]); end
+        set(axs, 'YLim', [min(lims(:, 1)), max(lims(:, 2))]);
         for L = 1:5
-            mark_clipped(axs(L), ones(height(S), 1), vals{L, 1}, C.OD);
-            mark_clipped(axs(L), 2 * ones(height(S), 1), vals{L, 2}, C.OS);
+            % triangles only: the values would overlap the points and lines in these narrow panels
+            mark_clipped(axs(L), ones(height(S), 1), vals{L, 1}, C.OD, false);
+            mark_clipped(axs(L), 2 * ones(height(S), 1), vals{L, 2}, C.OS, false);
         end
     end
-    title(tl, sprintf('%s, OD vs OS per visit (lines connect the same visit), %s', strtok(yLab, '('), C.modeName), 'FontSize', 9);
     save_fig(f, C, sprintf('res_paired_%s', metric));
 end
 
 function fig_paired_ratios(S, W, C)
     sides = {'Left', 'Right'}; ratios = {'L3_L4', 'L4_L5'};
-    f = newfig(17, 6.5);
-    tl = tiledlayout(f, 1, 4, 'TileSpacing', 'compact', 'Padding', 'compact');
+    f = newfig(C.W, 6);
+    % one inner layout per ROI side (heading 'Left ROI' / 'Right ROI'), with a wider gap between them
+    outer = tiledlayout(f, 1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
+    axs = gobjects(1, 4); vals = {}; k = 0;
     for s = 1:2
+        tl = tiledlayout(outer, 1, 2, 'TileSpacing', 'compact', 'Padding', 'tight');
+        tl.Layout.Tile = s;
+        title(tl, sprintf('%s ROI', sides{s}));
         for r = 1:2
-            ax = nexttile(tl);
+            k = k + 1; ax = nexttile(tl); axs(k) = ax;
             od = col(S, sprintf('Median_OD_%s_Ratio_%s%s', sides{s}, ratios{r}, C.sfx));
             os = col(S, sprintf('Median_OS_%s_Ratio_%s%s', sides{s}, ratios{r}, C.sfx));
             paired_panel(ax, od, os, C);
+            vals{end+1} = [od; os]; %#ok<AGROW>
             lay = strrep(ratios{r}, '_', '/');
-            title(ax, {sprintf('%s CR %s', sides{s}, lay), wil_tag(W, sides{s}, lay, ['CR ratio ' lay])}, ...
-                  'FontWeight', 'normal', 'FontSize', 7);
-            if s == 1 && r == 1, ylabel(ax, 'CR ratio'); end
+            title(ax, {sprintf('CR %s', lay), wil_tag(W, sides{s}, lay, ['CR ratio ' lay])});
+            if k == 1, ylabel(ax, 'CR ratio'); else, ax.YTickLabel = {}; end
         end
     end
+    set(axs, 'YLim', robust_lim(vertcat(vals{:})));
     save_fig(f, C, 'res_paired_ratios');
 end
 
@@ -338,7 +370,9 @@ function fig_bestfit(S, C)
     rois = [compose('Left_L%d', 1:5), compose('Right_L%d', 1:5)];
     xl = [compose('L%d', 1:5), compose('L%d', 1:5)];
 
-    f = newfig(17, 9);
+    % Box: best distribution (lowest median RMSE over visits); numbers: visits on which it was the
+    % best fit; white: fit failed (say so in the caption)
+    f = newfig(C.W, 8);
     tl = tiledlayout(f, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
     rankCmap = flipud(interp1([0 1], [0.93 0.93 0.93; 0.15 0.45 0.35], linspace(0, 1, 8)));
     for e = 1:2
@@ -366,7 +400,7 @@ function fig_bestfit(S, C)
                 if Wins(k, j) > 0
                     tc = 'k'; if Rk(k, j) <= 3, tc = 'w'; end
                     text(ax, j, k, sprintf('%d', Wins(k, j)), 'HorizontalAlignment', 'center', ...
-                         'FontSize', 6, 'Color', tc);
+                         'FontSize', C.fsSmall, 'Color', tc);
                 end
             end
             b = find(Rk(:, j) == 1, 1);
@@ -374,16 +408,13 @@ function fig_bestfit(S, C)
                 rectangle(ax, 'Position', [j - 0.48, b - 0.48, 0.96, 0.96], 'EdgeColor', 'k', 'LineWidth', 1.2);
             end
         end
-        set(ax, 'XTick', 1:numel(rois), 'XTickLabel', xl, 'YTick', 1:8, 'TickLength', [0 0], 'FontSize', 7, ...
-            'XColor', 'k', 'YColor', 'k');
+        set(ax, 'XTick', 1:numel(rois), 'XTickLabel', xl, 'YTick', 1:8, 'TickLength', [0 0], 'XTickLabelRotation', 0);
         if e == 1, set(ax, 'YTickLabel', names); else, set(ax, 'YTickLabel', {}); end
-        xlabel(ax, 'Left ROI             |             Right ROI');
-        title(ax, sprintf('(%c) %s', 'a' + e - 1, eyeNames{e}), 'FontWeight', 'normal');
+        xlabel(ax, 'Left ROI  |  Right ROI');
+        title(ax, sprintf('(%c) %s', 'a' + e - 1, eyeNames{e}));
     end
     cb = colorbar(ax); cb.Layout.Tile = 'east'; cb.Ticks = 1:8; cb.Direction = 'reverse';
-    cb.Label.String = 'rank by median GoF (1 = best)';
-    subtitle(tl, 'Box: best distribution (lowest median RMSE over visits). Numbers: visits on which it was the best fit. White: fit failed.', ...
-             'FontSize', 7);
+    cb.Label.String = 'rank (1 = best fit)';
     save_fig(f, C, 'res_bestfit');
 end
 
@@ -394,49 +425,50 @@ end
 function fig_corr_overview(S, C)
     eyes = {'OD', 'OS'}; eyeNames = {'OD (affected)', 'OS (fellow)'};
     for side = {'Right', 'Left'}
-        f = newfig(11.5, 24);
+        % M: fluid morphology + CRT, T: texture (CR, densitometry, distribution parameters)
+        f = newfig(C.W, 21);
         tl = tiledlayout(f, 5, 2, 'TileSpacing', 'tight', 'Padding', 'compact');
         for L = 1:5
             for e = 1:2
                 ax = nexttile(tl);
                 [X, labels, nMorph] = corr_matrix_build(S, eyes{e}, sprintf('%s_L%d', side{1}, L), C.sfx);
-                o = struct('ShowX', false, 'ShowY', false, 'MarkSize', 3.5);
+                o = struct('ShowX', false, 'ShowY', false, 'MarkSize', 5);
                 corr_matrix_draw(ax, X, labels, nMorph, C.method, C.cmap, o);
                 group_ticks(ax, numel(labels), nMorph);
-                if L == 1, title(ax, eyeNames{e}, 'FontWeight', 'bold', 'FontSize', 9); end
-                if e == 1, ylabel(ax, sprintf('L%d', L), 'FontWeight', 'bold', 'FontSize', 9, 'Rotation', 0, ...
+                if L == 1, title(ax, eyeNames{e}); end
+                if e == 1, ylabel(ax, sprintf('L%d', L), 'Rotation', 0, ...
                                   'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle'); end
             end
         end
         cb = colorbar(ax); cb.Layout.Tile = 'south'; cb.Label.String = sprintf('%s correlation', C.method);
-        title(tl, sprintf('%s ROI, %s', side{1}, C.modeName), 'FontSize', 10);
-        subtitle(tl, {'M: fluid morphology + thickness, T: CR, densitometry and distribution parameters', ...
-                      '* p < 0.05   ** q < 0.05 (FDR)   box: |r| \geq r_{min} (80% power)'}, 'FontSize', 7);
+        title(tl, sprintf('%s ROI', side{1}));
         save_fig(f, C, sprintf('res_corr_overview_%s', side{1}));
     end
 end
 
-% One page per layer: rows = Right / Left ROI, columns = OD | OS, all variable labels
+% One page per layer: rows = Right / Left ROI, columns = OD | OS.
+% Only the block texture (rows) x CRT and fluid morphology (columns) is shown, so the labels
+% can be read; R, p and the FDR are computed on the full matrix as in the dashboard.
 function fig_corr_detail(S, C, layers)
-    eyes = {'OD', 'OS'}; eyeNames = {'OD (affected)', 'OS (fellow)'}; sides = {'Right', 'Left'};
+    eyes = {'OD', 'OS'}; sides = {'Right', 'Left'};
     for L = layers
-        f = newfig(17, 20.5);
-        tl = tiledlayout(f, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+        f = newfig(C.W, 17.5);
+        tl = tiledlayout(f, 2, 2, 'TileSpacing', 'tight', 'Padding', 'compact');
         letter = 'a';
         for s = 1:2
             for e = 1:2
                 ax = nexttile(tl);
                 [X, labels, nMorph] = corr_matrix_build(S, eyes{e}, sprintf('%s_L%d', sides{s}, L), C.sfx);
-                o = struct('ShowX', true, 'ShowY', true, 'FontSize', 5, 'MarkSize', 4);
-                n = corr_matrix_draw(ax, X, labels, nMorph, C.method, C.cmap, o);
-                title(ax, sprintf('(%c) %s, %s ROI (n = %d)', letter, eyeNames{e}, sides{s}, n), ...
-                      'FontWeight', 'normal', 'FontSize', 8);
+                labels = strrep(strrep(labels, 'Central Thickness', 'CRT'), 'Hole ', 'Fluid ');
+                o = struct('ShowX', s == 2, 'ShowY', e == 1, 'FontSize', C.fsSmall, 'MarkSize', C.fsSmall, ...
+                           'Rows', nMorph + 1:numel(labels), 'Cols', 1:nMorph);
+                corr_matrix_draw(ax, X, labels, nMorph, C.method, C.cmap, o);
+                ax.Tag = 'small';   % tick labels at the small size, title at the normal size
+                title(ax, sprintf('(%c) %s, %s L%d ROI', letter, eyes{e}, sides{s}, L));
                 letter = letter + 1;
             end
         end
-        cb = colorbar(ax); cb.Layout.Tile = 'south'; cb.Label.String = sprintf('%s correlation', C.method);
-        title(tl, sprintf('Layer L%d, %s', L, C.modeName), 'FontSize', 10);
-        subtitle(tl, '* p < 0.05   ** q < 0.05 (FDR)   box: |r| \geq r_{min} (80% power)', 'FontSize', 7);
+        cb = colorbar(ax); cb.Layout.Tile = 'east'; cb.Label.String = sprintf('%s correlation', C.method);
         save_fig(f, C, sprintf('res_corr_L%d', L));
     end
 end
@@ -470,16 +502,16 @@ function fig_clinical(S, C)
     Q = fdr_bh([Pa(:); Pb(:)]);
     Qa = reshape(Q(1:40), 10, 4); Qb = reshape(Q(41:end), 10, 2);
 
-    f = newfig(14, 10);
-    tl = tiledlayout(f, 1, 6, 'TileSpacing', 'compact', 'Padding', 'compact');
+    % * p < 0.05, ** q < 0.05 (FDR over both panels), box: |rho| >= r_min (say so in the caption)
+    f = newfig(C.W, 10.5);
+    tl = tiledlayout(f, 1, 6, 'TileSpacing', 'tight', 'Padding', 'compact');
     ax = nexttile(tl, [1 4]);
     rho_heatmap(ax, Ra, Pa, Qa, Na, C, {'OD Left', 'OD Right', 'OS Left', 'OS Right'}, rowNames, true);
-    title(ax, '(a) vs. central retinal thickness', 'FontWeight', 'normal');
+    title(ax, '(a) vs. CRT');
     ax = nexttile(tl, [1 2]);
     rho_heatmap(ax, Rb, Pb, Qb, Nb, C, {'OD Left', 'OD Right'}, rowNames, false);
-    title(ax, '(b) vs. fluid area (OD)', 'FontWeight', 'normal');
+    title(ax, '(b) vs. OD fluid area');
     cb = colorbar(ax); cb.Layout.Tile = 'east'; cb.Label.String = sprintf('%s \\rho', C.method);
-    subtitle(tl, '* p < 0.05   ** q < 0.05 (FDR over both panels)   box: |\rho| \geq r_{min} (80% power)', 'FontSize', 7);
     save_fig(f, C, 'res_clinical');
 end
 
@@ -496,14 +528,14 @@ function rho_heatmap(ax, R, P, Q, N, C, xl, yl, showY)
             if isnan(R(r, c)), continue; end
             mk = ''; if P(r, c) < 0.05, mk = '*'; end
             if Q(r, c) < 0.05, mk = '**'; end
-            text(ax, c, r, sprintf('%.2f%s', R(r, c), mk), 'HorizontalAlignment', 'center', 'FontSize', 6, 'Color', 'k');
+            text(ax, c, r, sprintf('%.2f%s', R(r, c), mk), 'HorizontalAlignment', 'center', 'FontSize', C.fsSmall, 'Color', 'k');
             if P(r, c) < 0.05 && abs(R(r, c)) >= rMin(r, c)
                 rectangle(ax, 'Position', [c - 0.47, r - 0.47, 0.94, 0.94], 'EdgeColor', 'k', 'LineWidth', 0.9);
             end
         end
     end
-    set(ax, 'XTick', 1:numel(xl), 'XTickLabel', xl, 'YTick', 1:numel(yl), 'TickLength', [0 0], 'FontSize', 7, ...
-        'XColor', 'k', 'YColor', 'k', 'XTickLabelRotation', 30);
+    set(ax, 'XTick', 1:numel(xl), 'XTickLabel', xl, 'YTick', 1:numel(yl), 'TickLength', [0 0], ...
+        'XTickLabelRotation', 30);
     if showY, set(ax, 'YTickLabel', yl); else, set(ax, 'YTickLabel', {}); end
     box(ax, 'on');
 end
@@ -523,12 +555,12 @@ function v = paired_panel(ax, od, os, C)
         plot(ax, [1 2], [od(i) os(i)], '-', 'Color', [0.6 0.6 0.6 0.6], 'LineWidth', 0.5);
     end
     jit = 0.06;
-    scatter(ax, 1 + jit * (rand(sum(ok), 1) - 0.5), od(ok), 9, C.OD, 'filled', 'MarkerFaceAlpha', 0.85);
-    scatter(ax, 2 + jit * (rand(sum(ok), 1) - 0.5), os(ok), 9, C.OS, 'filled', 'MarkerFaceAlpha', 0.85);
+    scatter(ax, 1 + jit * (rand(sum(ok), 1) - 0.5), od(ok), 10, C.OD, 'filled', 'MarkerFaceAlpha', 0.85);
+    scatter(ax, 2 + jit * (rand(sum(ok), 1) - 0.5), os(ok), 10, C.OS, 'filled', 'MarkerFaceAlpha', 0.85);
     plot(ax, [0.75 1.25], median(od(ok)) * [1 1], 'k-', 'LineWidth', 1.8);
     plot(ax, [1.75 2.25], median(os(ok)) * [1 1], 'k-', 'LineWidth', 1.8);
-    set(ax, 'XTick', [1 2], 'XTickLabel', {'OD', 'OS'}, 'FontSize', 7);
-    xlim(ax, [0.5 2.5]); style_ax(ax);
+    set(ax, 'XTick', [1 2], 'XTickLabel', {'OD', 'OS'});
+    xlim(ax, [0.6 2.4]); style_ax(ax);
     v = [od(ok); os(ok)];
     if isempty(v), v = [0; 1]; end
 end
@@ -561,18 +593,22 @@ function yl = robust_lim(v)
 end
 
 % Points outside the axis are drawn on the edge as triangles with their value
-function mark_clipped(ax, x, y, col)
+function mark_clipped(ax, x, y, col, showValues)
+% Triangle on the axis edge for values outside the y-limits; showValues (default true) also
+% writes the value next to it
+    if nargin < 5, showValues = true; end
+    ST = thesis_style();
     yl = ylim(ax);
     hi = y > yl(2); lo = y < yl(1);
     if any(hi)
         plot(ax, x(hi), repmat(yl(2) - 0.03 * diff(yl), sum(hi), 1), '^', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
-        text(ax, x(hi), repmat(yl(2) - 0.03 * diff(yl), sum(hi), 1), compose(' %.2f', y(hi)), 'FontSize', 6, ...
-             'VerticalAlignment', 'top', 'Color', 'k');
+        if showValues, text(ax, x(hi), repmat(yl(2) - 0.03 * diff(yl), sum(hi), 1), compose(' %.2f', y(hi)), 'FontSize', ST.fsSmall, ...
+             'VerticalAlignment', 'top', 'Color', 'k'); end
     end
     if any(lo)
         plot(ax, x(lo), repmat(yl(1) + 0.03 * diff(yl), sum(lo), 1), 'v', 'MarkerFaceColor', col, 'MarkerEdgeColor', 'k', 'MarkerSize', 4);
-        text(ax, x(lo), repmat(yl(1) + 0.03 * diff(yl), sum(lo), 1), compose(' %.2f', y(lo)), 'FontSize', 6, ...
-             'VerticalAlignment', 'bottom', 'Color', 'k');
+        if showValues, text(ax, x(lo), repmat(yl(1) + 0.03 * diff(yl), sum(lo), 1), compose(' %.2f', y(lo)), 'FontSize', ST.fsSmall, ...
+             'VerticalAlignment', 'bottom', 'Color', 'k'); end
     end
 end
 
@@ -603,6 +639,8 @@ function [mName, yLab] = metric_label(metric)
         case 'Densito', mName = 'Densitometry'; yLab = 'Densitometry (a.u.)';
         case 'NK_mu',   mName = 'Nakagami mu';  yLab = 'Nakagami m';
         case 'NK_om',   mName = 'Nakagami om';  yLab = 'Nakagami \Omega';
+        case 'GAM_A',   mName = 'Gamma A';      yLab = 'Gamma shape a';
+        case 'GAM_B',   mName = 'Gamma B';      yLab = 'Gamma scale b';
         otherwise,      mName = metric;         yLab = strrep(metric, '_', ' ');
     end
 end
@@ -622,24 +660,28 @@ end
 % Marks the two variable groups on an unlabelled matrix
 function group_ticks(ax, n, nMorph)
     set(ax, 'XTick', [nMorph / 2 + 0.5, (nMorph + n) / 2 + 0.5], 'XTickLabel', {'M', 'T'}, ...
-            'YTick', [nMorph / 2 + 0.5, (nMorph + n) / 2 + 0.5], 'YTickLabel', {'M', 'T'}, 'FontSize', 6);
+            'YTick', [nMorph / 2 + 0.5, (nMorph + n) / 2 + 0.5], 'YTickLabel', {'M', 'T'});
 end
 
 function style_ax(ax)
     grid(ax, 'on'); box(ax, 'on');
-    set(ax, 'XColor', 'k', 'YColor', 'k', 'GridAlpha', 0.15, 'FontSize', 7);
+    set(ax, 'XColor', 'k', 'YColor', 'k', 'GridAlpha', 0.15);
 end
 
 function f = newfig(w, h)
-    f = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 w h], 'Color', 'w');
-    if isprop(f, 'Theme'), f.Theme = 'light'; end
-    f.Color = 'w';
+    f = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 w h]);
+    thesis_style(f);   % white figure, light theme (fonts are set in save_fig)
 end
 
 function save_fig(f, C, name)
     base = fullfile(C.out, name);
-    exportgraphics(f, [base '.png'], 'Resolution', 300);
-    exportgraphics(f, [base '.pdf'], 'ContentType', 'vector');
+    thesis_style(f, 'finish');   % same font size in every figure
+    drawnow;                     % finish rendering first (avoids graphics timeouts in the desktop)
+    warning('off', 'MATLAB:print:ContentTypeImageSuggested');
+    % 'figure': export the whole figure (14.5 cm), so the layout padding stays as a margin
+    % on every side and nothing at the edge is cropped
+    exportgraphics(f, [base '.png'], 'Resolution', 300, 'Padding', 'figure');
+    exportgraphics(f, [base '.pdf'], 'ContentType', 'vector', 'Padding', 'figure');
     close(f);
     fprintf('Saved %s.png / .pdf\n', base);
 end

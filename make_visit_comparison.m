@@ -24,11 +24,13 @@ function make_visit_comparison(visitFolders, options)
 
     V = db_manager('get_visits');
     nV = numel(visitFolders);
-    layerCols = [0.95 0.35 0.25; 0.98 0.75 0.15; 0.35 0.8 0.35; 0.25 0.65 0.95; 0.75 0.4 0.9];
+    ST = thesis_style();
+    layerCols = ST.layerCols;
 
-    f = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 17 3.3 * nV + 1.5], 'Color', 'w');
-    if isprop(f, 'Theme'), f.Theme = 'light'; end
-    tl = tiledlayout(f, nV, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    % 14.5 cm wide (	extwidth); each row is one visit, OD left and OS right
+    f = figure('Visible', 'off', 'Units', 'centimeters', 'Position', [1 1 ST.width 2.9 * nV + 1.0]);
+    thesis_style(f);
+    tl = tiledlayout(f, nV, 2, 'TileSpacing', 'tight', 'Padding', 'tight');
     letter = 'a';
     for v = 1:nV
         folder = strip(visitFolders{v}, 'right', filesep);
@@ -56,16 +58,15 @@ function make_visit_comparison(visitFolders, options)
             plot(ax, 1:R.sx, R.RPE_bot, 'm-', 'LineWidth', 0.6, 'HandleVisibility', 'off');
             if R.isHole
                 bnd = bwboundaries(R.Hole);
-                for b = 1:numel(bnd), plot(ax, bnd{b}(:, 2), bnd{b}(:, 1), 'w-', 'LineWidth', 0.9, 'HandleVisibility', 'off'); end
+                for b = 1:numel(bnd), plot(ax, bnd{b}(:, 2), bnd{b}(:, 1), '-', 'Color', ST.fluid, 'LineWidth', 0.9, 'HandleVisibility', 'off'); end
             end
             crt = NaN; day = NaN;
             if ~isempty(k)
                 crt = V.(sprintf('CentralThickness_%s', eyeName))(k);
                 day = days(V.VisitDate(k) - min(V.VisitDate));
             end
-            fl = 'no fluid'; if R.isHole, fl = 'fluid'; end
-            title(ax, sprintf('(%c) %s, %s (day %d), CRT %d \\mum, %s', letter, eyeName, ...
-                  datestr(dt, 'dd.mm.yyyy'), round(day), round(crt), fl), 'FontWeight', 'normal', 'FontSize', 7); %#ok<DATST>
+            % short title so it fits at the thesis font size; the dates go in the caption
+            title(ax, sprintf('(%c) %s, day %d, CRT %d \\mum', letter, eyeName, round(day), round(crt)));
             letter = letter + 1;
         end
     end
@@ -74,10 +75,12 @@ function make_visit_comparison(visitFolders, options)
         plot(ax, NaN, NaN, 's', 'MarkerFaceColor', layerCols(L, :), 'MarkerEdgeColor', 'none', ...
              'MarkerSize', 7, 'DisplayName', sprintf('L%d', L));
     end
-    lg = legend(ax, 'Orientation', 'horizontal', 'TextColor', 'k', 'FontSize', 7);
+    plot(ax, NaN, NaN, '-', 'Color', ST.fluid, 'LineWidth', 1.2, 'DisplayName', 'Fluid pocket');
+    lg = legend(ax, 'Orientation', 'horizontal', 'TextColor', 'k');
     lg.Layout.Tile = 'south';
 
     base = fullfile(options.OutDir, 'res_visit_comparison');
+    thesis_style(f, 'finish');
     exportgraphics(f, [base '.png'], 'Resolution', 300);
     exportgraphics(f, [base '.pdf'], 'ContentType', 'image', 'Resolution', 300);
     close(f);
